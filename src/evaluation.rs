@@ -231,6 +231,26 @@ mod tests {
         Rule { head, body }
     }
 
+    fn int(n: i64) -> Term {
+        Term::Constant(Value::Integer(n))
+    }
+
+    fn float(f: f64) -> Term {
+        Term::Constant(Value::Float(f))
+    }
+
+    fn boolean(b: bool) -> Term {
+        Term::Constant(Value::Boolean(b))
+    }
+
+    fn string(s: &str) -> Term {
+        Term::Constant(Value::String(Intern::new(s.to_string())))
+    }
+
+    fn compound(functor: &str, args: Vec<Term>) -> Term {
+        Term::Compound(Intern::new(functor.to_string()), args)
+    }
+
     // Naive evaluation tests
     #[test]
     fn test_naive_evaluation_no_rules() {
@@ -1354,5 +1374,252 @@ mod tests {
         // Dangerous transitions should NOT be safe_transitions
         assert!(!result.contains(&make_atom("safe_transition", vec![atom_const("s1"), atom_const("danger")])));
         assert!(!result.contains(&make_atom("safe_transition", vec![atom_const("danger"), atom_const("s3")])));
+    }
+
+    // Comprehensive datatype tests
+    #[test]
+    fn test_all_datatypes_in_evaluation() {
+        // Test that all Value types work through the full evaluation pipeline
+        let mut db = FactDatabase::new();
+
+        // Integer facts
+        db.insert(make_atom("health", vec![atom_const("player"), int(100)]));
+        db.insert(make_atom("damage", vec![atom_const("enemy"), int(-25)]));
+        db.insert(make_atom("score", vec![int(0)]));
+
+        // Float facts
+        db.insert(make_atom("position", vec![atom_const("player"), float(3.14), float(-2.5)]));
+        db.insert(make_atom("speed", vec![float(10.5)]));
+
+        // Boolean facts
+        db.insert(make_atom("is_alive", vec![atom_const("player"), boolean(true)]));
+        db.insert(make_atom("has_key", vec![atom_const("player"), boolean(false)]));
+
+        // String facts
+        db.insert(make_atom("name", vec![atom_const("player"), string("Alice")]));
+        db.insert(make_atom("message", vec![string("Hello")]));
+
+        // Compound term facts
+        db.insert(make_atom("inventory", vec![
+            atom_const("player"),
+            compound("item", vec![atom_const("sword"), int(10), float(5.5)])
+        ]));
+
+        // Rules using different datatypes
+        let rules = vec![
+            // Rule: can_attack if alive and has positive health
+            make_rule(
+                make_atom("can_attack", vec![var("P")]),
+                vec![
+                    Literal::Positive(make_atom("is_alive", vec![var("P"), boolean(true)])),
+                    Literal::Positive(make_atom("health", vec![var("P"), var("H")])),
+                ],
+            ),
+            // Rule: healthy if health > 50
+            make_rule(
+                make_atom("healthy", vec![var("P")]),
+                vec![
+                    Literal::Positive(make_atom("health", vec![var("P"), int(100)])),
+                ],
+            ),
+            // Rule: has_weapon if inventory contains item with type sword
+            make_rule(
+                make_atom("has_weapon", vec![var("P")]),
+                vec![
+                    Literal::Positive(make_atom("inventory", vec![
+                        var("P"),
+                        compound("item", vec![atom_const("sword"), var("Qty"), var("Weight")])
+                    ])),
+                ],
+            ),
+            // Rule: greeting using string
+            make_rule(
+                make_atom("greeting", vec![var("P"), var("Msg")]),
+                vec![
+                    Literal::Positive(make_atom("name", vec![var("P"), var("Name")])),
+                    Literal::Positive(make_atom("message", vec![var("Msg")])),
+                ],
+            ),
+        ];
+
+        let result = semi_naive_evaluation(&rules, db);
+
+        // Verify integer matching worked
+        assert!(result.contains(&make_atom("healthy", vec![atom_const("player")])));
+
+        // Verify boolean matching worked
+        assert!(result.contains(&make_atom("can_attack", vec![atom_const("player")])));
+
+        // Verify compound term matching worked
+        assert!(result.contains(&make_atom("has_weapon", vec![atom_const("player")])));
+
+        // Verify string propagation worked
+        assert!(result.contains(&make_atom("greeting", vec![atom_const("player"), string("Hello")])));
+
+        // Query with integer
+        let health_query = make_atom("health", vec![var("Who"), int(100)]);
+        let health_results = result.query(&health_query);
+        assert_eq!(health_results.len(), 1);
+
+        // Query with boolean
+        let alive_query = make_atom("is_alive", vec![var("Who"), boolean(true)]);
+        let alive_results = result.query(&alive_query);
+        assert_eq!(alive_results.len(), 1);
+
+        // Query with float
+        let speed_query = make_atom("speed", vec![var("S")]);
+        let speed_results = result.query(&speed_query);
+        assert_eq!(speed_results.len(), 1);
+        let s = Intern::new("S".to_string());
+        assert_eq!(speed_results[0].get(&s), Some(&float(10.5)));
+    }
+
+    #[test]
+    fn test_negation_with_different_datatypes() {
+        use crate::parser;
+        use crate::ast::Statement;
+
+        let program_text = r#"
+            % Player stats
+            player(alice).
+            player(bob).
+
+            % Alice has a shield
+            has_shield(alice, true).
+
+            % Bob does not have a shield (no fact)
+
+            % Damage values
+            base_damage(10).
+            base_damage(20).
+
+            % Stratum 1: vulnerable if player without shield
+            vulnerable(P) :- player(P), not has_shield(P, true).
+
+            % Stratum 1: will_take_damage combines player and damage
+            will_take_damage(P, D) :- vulnerable(P), base_damage(D).
+        "#;
+
+        let program = parser::parse_program(program_text)
+            .expect("Should parse successfully");
+
+        let mut initial_db = FactDatabase::new();
+        let mut rules = Vec::new();
+
+        for statement in program.statements {
+            match statement {
+                Statement::Fact(fact) => {
+                    initial_db.insert(fact.atom);
+                }
+                Statement::Rule(rule) => {
+                    rules.push(rule);
+                }
+                _ => {}
+            }
+        }
+
+        let result = stratified_evaluation(&rules, initial_db).unwrap();
+
+        // Bob is vulnerable (no shield)
+        assert!(result.contains(&make_atom("vulnerable", vec![atom_const("bob")])));
+
+        // Alice is NOT vulnerable (has shield)
+        assert!(!result.contains(&make_atom("vulnerable", vec![atom_const("alice")])));
+
+        // Bob will take damage (vulnerable)
+        assert!(result.contains(&make_atom("will_take_damage", vec![atom_const("bob"), int(10)])));
+        assert!(result.contains(&make_atom("will_take_damage", vec![atom_const("bob"), int(20)])));
+
+        // Alice will NOT take damage (not vulnerable)
+        assert!(!result.contains(&make_atom("will_take_damage", vec![atom_const("alice"), int(10)])));
+
+        let vulnerable_pred = Intern::new("vulnerable".to_string());
+        let vulnerable = result.get_by_predicate(&vulnerable_pred);
+        assert_eq!(vulnerable.len(), 1);
+    }
+
+    #[test]
+    fn test_compound_terms_in_recursion() {
+        let mut db = FactDatabase::new();
+
+        // Graph with compound term labels
+        db.insert(make_atom("edge", vec![
+            compound("node", vec![atom_const("a"), int(1)]),
+            compound("node", vec![atom_const("b"), int(2)])
+        ]));
+        db.insert(make_atom("edge", vec![
+            compound("node", vec![atom_const("b"), int(2)]),
+            compound("node", vec![atom_const("c"), int(3)])
+        ]));
+
+        // Transitive closure with compound terms
+        let rules = vec![
+            make_rule(
+                make_atom("path", vec![var("X"), var("Y")]),
+                vec![Literal::Positive(make_atom("edge", vec![var("X"), var("Y")]))],
+            ),
+            make_rule(
+                make_atom("path", vec![var("X"), var("Z")]),
+                vec![
+                    Literal::Positive(make_atom("path", vec![var("X"), var("Y")])),
+                    Literal::Positive(make_atom("edge", vec![var("Y"), var("Z")])),
+                ],
+            ),
+        ];
+
+        let result = semi_naive_evaluation(&rules, db);
+
+        // Should derive path from node(a,1) to node(c,3)
+        assert!(result.contains(&make_atom("path", vec![
+            compound("node", vec![atom_const("a"), int(1)]),
+            compound("node", vec![atom_const("c"), int(3)])
+        ])));
+
+        let path_pred = Intern::new("path".to_string());
+        let paths = result.get_by_predicate(&path_pred);
+
+        // Should have: (a,1)->(b,2), (b,2)->(c,3), (a,1)->(c,3)
+        assert_eq!(paths.len(), 3);
+    }
+
+    #[test]
+    fn test_float_and_string_with_negation() {
+        let mut db = FactDatabase::new();
+
+        // Temperature readings
+        db.insert(make_atom("temp", vec![atom_const("room1"), float(20.5)]));
+        db.insert(make_atom("temp", vec![atom_const("room2"), float(15.0)]));
+        db.insert(make_atom("temp", vec![atom_const("room3"), float(25.5)]));
+
+        // Labels
+        db.insert(make_atom("label", vec![atom_const("room1"), string("comfortable")]));
+        db.insert(make_atom("label", vec![atom_const("room3"), string("warm")]));
+        // room2 has no label
+
+        // Rules
+        let rules = vec![
+            // Unlabeled rooms
+            make_rule(
+                make_atom("unlabeled", vec![var("R")]),
+                vec![
+                    Literal::Positive(make_atom("temp", vec![var("R"), var("T")])),
+                    Literal::Negative(make_atom("label", vec![var("R"), var("L")])),
+                ],
+            ),
+        ];
+
+        let result = stratified_evaluation(&rules, db).unwrap();
+
+        // room2 is unlabeled
+        assert!(result.contains(&make_atom("unlabeled", vec![atom_const("room2")])));
+
+        // room1 and room3 are NOT unlabeled (they have labels)
+        assert!(!result.contains(&make_atom("unlabeled", vec![atom_const("room1")])));
+        assert!(!result.contains(&make_atom("unlabeled", vec![atom_const("room3")])));
+
+        // Query for unlabeled rooms
+        let unlabeled_query = make_atom("unlabeled", vec![var("R")]);
+        let unlabeled_results = result.query(&unlabeled_query);
+        assert_eq!(unlabeled_results.len(), 1);
     }
 }
