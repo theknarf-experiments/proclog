@@ -1,8 +1,85 @@
 mod ast;
 mod parser;
+mod unification;
+mod database;
+mod grounding;
+mod evaluation;
 
 fn main() {
     println!("ProcLog - Datalog for Procedural Generation\n");
+    println!("============================================\n");
+
+    demo_evaluation();
+    println!("\n");
+    demo_datatypes();
+}
+
+fn demo_evaluation() {
+    use ast::Statement;
+    use database::FactDatabase;
+    use evaluation::semi_naive_evaluation;
+
+    println!("Demo 1: Transitive Closure (Semi-Naive Evaluation)");
+    println!("---------------------------------------------------");
+
+    let program_text = r#"
+        % Graph edges
+        edge(a, b).
+        edge(b, c).
+        edge(c, d).
+        edge(b, e).
+
+        % Transitive closure
+        path(X, Y) :- edge(X, Y).
+        path(X, Z) :- path(X, Y), edge(Y, Z).
+    "#;
+
+    match parser::parse_program(program_text) {
+        Ok(program) => {
+            let mut initial_db = FactDatabase::new();
+            let mut rules = Vec::new();
+
+            for statement in program.statements {
+                match statement {
+                    Statement::Fact(fact) => {
+                        initial_db.insert(fact.atom);
+                    }
+                    Statement::Rule(rule) => {
+                        rules.push(rule);
+                    }
+                    _ => {}
+                }
+            }
+
+            println!("Initial facts: {} edges", initial_db.len());
+            println!("Rules: {} (edge to path, transitive path)", rules.len());
+
+            let result_db = semi_naive_evaluation(&rules, initial_db);
+
+            println!("\nAfter evaluation: {} total facts", result_db.len());
+
+            let path_pred = internment::Intern::new("path".to_string());
+            let paths = result_db.get_by_predicate(&path_pred);
+            println!("Derived {} path facts:", paths.len());
+
+            for path in paths {
+                if let (Some(ast::Term::Constant(ast::Value::Atom(from))),
+                        Some(ast::Term::Constant(ast::Value::Atom(to)))) =
+                    (path.terms.get(0), path.terms.get(1))
+                {
+                    println!("  path({}, {})", from, to);
+                }
+            }
+        }
+        Err(errors) => {
+            println!("Parse errors: {:?}", errors);
+        }
+    }
+}
+
+fn demo_datatypes() {
+    println!("Demo 2: Datatype Support");
+    println!("------------------------");
 
     let program_text = r#"
         /* ProcLog Demo - All Supported Datatypes */
