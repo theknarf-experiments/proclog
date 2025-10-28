@@ -1,7 +1,48 @@
-use crate::ast::{Rule, Atom};
+use crate::ast::{Rule, Atom, Constraint, Literal};
 use crate::database::FactDatabase;
-use crate::grounding::{ground_rule, ground_rule_semi_naive};
+use crate::grounding::{ground_rule, ground_rule_semi_naive, satisfy_body};
 use crate::stratification::{stratify, StratificationError};
+use crate::safety::{check_program_safety, SafetyError};
+
+/// Errors that can occur during evaluation
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EvaluationError {
+    /// Program violates safety rules
+    Safety(SafetyError),
+    /// Program is not stratifiable (cycle through negation)
+    Stratification(StratificationError),
+    /// Constraint violation (integrity constraint failed)
+    ConstraintViolation {
+        constraint: String,
+        violation_count: usize,
+    },
+}
+
+impl std::fmt::Display for EvaluationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EvaluationError::Safety(e) => write!(f, "Safety error: {}", e),
+            EvaluationError::Stratification(e) => write!(f, "Stratification error: {:?}", e),
+            EvaluationError::ConstraintViolation { constraint, violation_count } => {
+                write!(f, "Constraint '{}' violated {} time(s)", constraint, violation_count)
+            }
+        }
+    }
+}
+
+impl std::error::Error for EvaluationError {}
+
+impl From<SafetyError> for EvaluationError {
+    fn from(e: SafetyError) -> Self {
+        EvaluationError::Safety(e)
+    }
+}
+
+impl From<StratificationError> for EvaluationError {
+    fn from(e: StratificationError) -> Self {
+        EvaluationError::Stratification(e)
+    }
+}
 
 /// Naive evaluation: repeatedly apply all rules until fixed point
 /// This is simple but inefficient - it re-evaluates all facts every iteration
@@ -187,10 +228,59 @@ pub fn semi_naive_evaluation_instrumented(rules: &[Rule], initial_facts: FactDat
     (db, stats)
 }
 
+/// Check constraints against the database
+/// Returns an error if any constraint is violated
+/// A constraint is violated if its body is satisfied (i.e., there exist substitutions)
+pub fn check_constraints(constraints: &[Constraint], db: &FactDatabase) -> Result<(), EvaluationError> {
+    for constraint in constraints {
+        let violations = satisfy_body(&constraint.body, db);
+        if !violations.is_empty() {
+            return Err(EvaluationError::ConstraintViolation {
+                constraint: format!("{:?}", constraint.body),
+                violation_count: violations.len(),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Stratified evaluation with constraints
+/// Evaluates rules stratum by stratum, then checks constraints
+pub fn stratified_evaluation_with_constraints(
+    rules: &[Rule],
+    constraints: &[Constraint],
+    initial_facts: FactDatabase,
+) -> Result<FactDatabase, EvaluationError> {
+    // Check safety first (variables in negation, etc.)
+    check_program_safety(rules)?;
+
+    // Stratify the program
+    let stratification = stratify(rules)?;
+
+    let mut db = initial_facts;
+
+    // Evaluate each stratum to completion before moving to next
+    for stratum_rules in &stratification.rules_by_stratum {
+        // Evaluate this stratum to fixed point using semi-naive
+        db = semi_naive_evaluation(stratum_rules, db);
+    }
+
+    // Check constraints after evaluation
+    check_constraints(constraints, &db)?;
+
+    Ok(db)
+}
+
 /// Stratified evaluation: evaluates program stratum by stratum
 /// This allows safe handling of negation by ensuring negated predicates
 /// are fully computed before being used
-pub fn stratified_evaluation(rules: &[Rule], initial_facts: FactDatabase) -> Result<FactDatabase, StratificationError> {
+///
+/// Note: This version doesn't check constraints. Use stratified_evaluation_with_constraints
+/// if you need constraint checking.
+pub fn stratified_evaluation(rules: &[Rule], initial_facts: FactDatabase) -> Result<FactDatabase, EvaluationError> {
+    // Check safety first (variables in negation, etc.)
+    check_program_safety(rules)?;
+
     // Stratify the program
     let stratification = stratify(rules)?;
 
@@ -1596,14 +1686,22 @@ mod tests {
         db.insert(make_atom("label", vec![atom_const("room3"), string("warm")]));
         // room2 has no label
 
-        // Rules
+        // Rules - rewritten to be safe:
+        // First derive which rooms have labels, then find unlabeled ones
         let rules = vec![
-            // Unlabeled rooms
+            // has_label(R) :- label(R, L).
+            make_rule(
+                make_atom("has_label", vec![var("R")]),
+                vec![
+                    Literal::Positive(make_atom("label", vec![var("R"), var("L")])),
+                ],
+            ),
+            // unlabeled(R) :- temp(R, T), not has_label(R).
             make_rule(
                 make_atom("unlabeled", vec![var("R")]),
                 vec![
                     Literal::Positive(make_atom("temp", vec![var("R"), var("T")])),
-                    Literal::Negative(make_atom("label", vec![var("R"), var("L")])),
+                    Literal::Negative(make_atom("has_label", vec![var("R")])),
                 ],
             ),
         ];
@@ -1621,5 +1719,596 @@ mod tests {
         let unlabeled_query = make_atom("unlabeled", vec![var("R")]);
         let unlabeled_results = result.query(&unlabeled_query);
         assert_eq!(unlabeled_results.len(), 1);
+    }
+
+    // ===== Constraint Tests =====
+
+    #[test]
+    fn test_constraint_no_violation() {
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("safe", vec![atom_const("a")]));
+        db.insert(make_atom("safe", vec![atom_const("b")]));
+
+        // Constraint: :- unsafe(X).
+        let constraints = vec![Constraint {
+            body: vec![Literal::Positive(make_atom("unsafe", vec![var("X")]))],
+        }];
+
+        // Should pass - no unsafe facts
+        assert!(check_constraints(&constraints, &db).is_ok());
+    }
+
+    #[test]
+    fn test_constraint_violation() {
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("safe", vec![atom_const("a")]));
+        db.insert(make_atom("unsafe", vec![atom_const("b")]));
+
+        // Constraint: :- unsafe(X).
+        let constraints = vec![Constraint {
+            body: vec![Literal::Positive(make_atom("unsafe", vec![var("X")]))],
+        }];
+
+        // Should fail - unsafe(b) exists
+        let result = check_constraints(&constraints, &db);
+        assert!(result.is_err());
+
+        if let Err(EvaluationError::ConstraintViolation { violation_count, .. }) = result {
+            assert_eq!(violation_count, 1);
+        } else {
+            panic!("Expected ConstraintViolation error");
+        }
+    }
+
+    #[test]
+    fn test_constraint_multiple_violations() {
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("unsafe", vec![atom_const("a")]));
+        db.insert(make_atom("unsafe", vec![atom_const("b")]));
+        db.insert(make_atom("unsafe", vec![atom_const("c")]));
+
+        // Constraint: :- unsafe(X).
+        let constraints = vec![Constraint {
+            body: vec![Literal::Positive(make_atom("unsafe", vec![var("X")]))],
+        }];
+
+        let result = check_constraints(&constraints, &db);
+        assert!(result.is_err());
+
+        if let Err(EvaluationError::ConstraintViolation { violation_count, .. }) = result {
+            assert_eq!(violation_count, 3);
+        }
+    }
+
+    #[test]
+    fn test_constraint_with_conjunction() {
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("player", vec![atom_const("alice")]));
+        db.insert(make_atom("player", vec![atom_const("bob")]));
+        db.insert(make_atom("dead", vec![atom_const("alice")]));
+        db.insert(make_atom("has_weapon", vec![atom_const("alice")]));
+
+        // Constraint: :- dead(X), has_weapon(X).
+        // (Dead players shouldn't have weapons)
+        let constraints = vec![Constraint {
+            body: vec![
+                Literal::Positive(make_atom("dead", vec![var("X")])),
+                Literal::Positive(make_atom("has_weapon", vec![var("X")])),
+            ],
+        }];
+
+        let result = check_constraints(&constraints, &db);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_constraint_with_negation() {
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("player", vec![atom_const("alice")]));
+        db.insert(make_atom("player", vec![atom_const("bob")]));
+        db.insert(make_atom("has_health", vec![atom_const("alice")]));
+        // bob has no health
+
+        // Constraint: :- player(X), not has_health(X).
+        // (All players must have health)
+        let constraints = vec![Constraint {
+            body: vec![
+                Literal::Positive(make_atom("player", vec![var("X")])),
+                Literal::Negative(make_atom("has_health", vec![var("X")])),
+            ],
+        }];
+
+        let result = check_constraints(&constraints, &db);
+        assert!(result.is_err());
+
+        if let Err(EvaluationError::ConstraintViolation { violation_count, .. }) = result {
+            assert_eq!(violation_count, 1); // bob violates
+        }
+    }
+
+    #[test]
+    fn test_stratified_evaluation_with_constraints_pass() {
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("edge", vec![atom_const("a"), atom_const("b")]));
+        db.insert(make_atom("edge", vec![atom_const("b"), atom_const("c")]));
+        db.insert(make_atom("blocked", vec![atom_const("d")]));
+
+        // path(X, Y) :- edge(X, Y).
+        // path(X, Z) :- path(X, Y), edge(Y, Z).
+        let rules = vec![
+            make_rule(
+                make_atom("path", vec![var("X"), var("Y")]),
+                vec![Literal::Positive(make_atom("edge", vec![var("X"), var("Y")]))],
+            ),
+            make_rule(
+                make_atom("path", vec![var("X"), var("Z")]),
+                vec![
+                    Literal::Positive(make_atom("path", vec![var("X"), var("Y")])),
+                    Literal::Positive(make_atom("edge", vec![var("Y"), var("Z")])),
+                ],
+            ),
+        ];
+
+        // Constraint: :- path(X, Y), blocked(X).
+        // (No paths from blocked nodes)
+        let constraints = vec![Constraint {
+            body: vec![
+                Literal::Positive(make_atom("path", vec![var("X"), var("Y")])),
+                Literal::Positive(make_atom("blocked", vec![var("X")])),
+            ],
+        }];
+
+        // Should pass - no paths from blocked nodes
+        let result = stratified_evaluation_with_constraints(&rules, &constraints, db);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_stratified_evaluation_with_constraints_fail() {
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("edge", vec![atom_const("a"), atom_const("b")]));
+        db.insert(make_atom("edge", vec![atom_const("b"), atom_const("c")]));
+        db.insert(make_atom("blocked", vec![atom_const("a")])); // a is blocked!
+
+        // path(X, Y) :- edge(X, Y).
+        // path(X, Z) :- path(X, Y), edge(Y, Z).
+        let rules = vec![
+            make_rule(
+                make_atom("path", vec![var("X"), var("Y")]),
+                vec![Literal::Positive(make_atom("edge", vec![var("X"), var("Y")]))],
+            ),
+            make_rule(
+                make_atom("path", vec![var("X"), var("Z")]),
+                vec![
+                    Literal::Positive(make_atom("path", vec![var("X"), var("Y")])),
+                    Literal::Positive(make_atom("edge", vec![var("Y"), var("Z")])),
+                ],
+            ),
+        ];
+
+        // Constraint: :- path(X, Y), blocked(X).
+        let constraints = vec![Constraint {
+            body: vec![
+                Literal::Positive(make_atom("path", vec![var("X"), var("Y")])),
+                Literal::Positive(make_atom("blocked", vec![var("X")])),
+            ],
+        }];
+
+        // Should fail - paths exist from blocked node 'a'
+        let result = stratified_evaluation_with_constraints(&rules, &constraints, db);
+        assert!(result.is_err());
+    }
+
+    // ===== 0-Arity Predicate Tests =====
+
+    #[test]
+    fn test_zero_arity_fact() {
+        let mut db = FactDatabase::new();
+        // winner. (no arguments)
+        db.insert(make_atom("winner", vec![]));
+        db.insert(make_atom("game_over", vec![]));
+
+        assert!(db.contains(&make_atom("winner", vec![])));
+        assert!(db.contains(&make_atom("game_over", vec![])));
+    }
+
+    #[test]
+    fn test_zero_arity_rule() {
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("player_alive", vec![]));
+        db.insert(make_atom("has_treasure", vec![]));
+
+        // won :- player_alive, has_treasure.
+        let rules = vec![make_rule(
+            make_atom("won", vec![]),
+            vec![
+                Literal::Positive(make_atom("player_alive", vec![])),
+                Literal::Positive(make_atom("has_treasure", vec![])),
+            ],
+        )];
+
+        let result = stratified_evaluation(&rules, db).unwrap();
+
+        assert!(result.contains(&make_atom("won", vec![])));
+    }
+
+    #[test]
+    fn test_zero_arity_with_negation() {
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("game_active", vec![]));
+        // no winner fact
+
+        // playing :- game_active, not winner.
+        let rules = vec![make_rule(
+            make_atom("playing", vec![]),
+            vec![
+                Literal::Positive(make_atom("game_active", vec![])),
+                Literal::Negative(make_atom("winner", vec![])),
+            ],
+        )];
+
+        let result = stratified_evaluation(&rules, db).unwrap();
+
+        assert!(result.contains(&make_atom("playing", vec![])));
+    }
+
+    #[test]
+    fn test_zero_arity_constraint() {
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("game_over", vec![]));
+
+        // Constraint: :- game_over.
+        let constraints = vec![Constraint {
+            body: vec![Literal::Positive(make_atom("game_over", vec![]))],
+        }];
+
+        let result = check_constraints(&constraints, &db);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_zero_arity_mixed_with_normal() {
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("winner_exists", vec![]));
+        db.insert(make_atom("player", vec![atom_const("alice")]));
+        db.insert(make_atom("player", vec![atom_const("bob")]));
+
+        // is_winner(X) :- winner_exists, player(X).
+        let rules = vec![make_rule(
+            make_atom("is_winner", vec![var("X")]),
+            vec![
+                Literal::Positive(make_atom("winner_exists", vec![])),
+                Literal::Positive(make_atom("player", vec![var("X")])),
+            ],
+        )];
+
+        let result = stratified_evaluation(&rules, db).unwrap();
+
+        assert!(result.contains(&make_atom("is_winner", vec![atom_const("alice")])));
+        assert!(result.contains(&make_atom("is_winner", vec![atom_const("bob")])));
+    }
+
+    // ===== Facts-Only Program Tests =====
+
+    #[test]
+    fn test_facts_only_no_rules() {
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("fact1", vec![atom_const("a")]));
+        db.insert(make_atom("fact2", vec![atom_const("b")]));
+        db.insert(make_atom("fact3", vec![atom_const("c")]));
+
+        let rules = vec![]; // No rules!
+
+        let result = stratified_evaluation(&rules, db.clone()).unwrap();
+
+        // Database should remain unchanged
+        assert_eq!(result.len(), 3);
+        assert!(result.contains(&make_atom("fact1", vec![atom_const("a")])));
+        assert!(result.contains(&make_atom("fact2", vec![atom_const("b")])));
+        assert!(result.contains(&make_atom("fact3", vec![atom_const("c")])));
+    }
+
+    #[test]
+    fn test_facts_only_with_query() {
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("parent", vec![atom_const("john"), atom_const("mary")]));
+        db.insert(make_atom("parent", vec![atom_const("john"), atom_const("bob")]));
+        db.insert(make_atom("parent", vec![atom_const("mary"), atom_const("alice")]));
+
+        // Query: parent(john, X)?
+        let query = make_atom("parent", vec![atom_const("john"), var("X")]);
+        let results = db.query(&query);
+
+        assert_eq!(results.len(), 2);
+    }
+
+    // ===== Duplicate Rules/Facts Tests =====
+
+    #[test]
+    fn test_duplicate_facts() {
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("fact", vec![atom_const("a")]));
+        db.insert(make_atom("fact", vec![atom_const("a")])); // Duplicate!
+        db.insert(make_atom("fact", vec![atom_const("a")])); // Another duplicate!
+
+        // HashSet should deduplicate
+        assert_eq!(db.len(), 1);
+    }
+
+    #[test]
+    fn test_duplicate_rules() {
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("edge", vec![atom_const("a"), atom_const("b")]));
+
+        // Same rule twice
+        let rules = vec![
+            make_rule(
+                make_atom("path", vec![var("X"), var("Y")]),
+                vec![Literal::Positive(make_atom("edge", vec![var("X"), var("Y")]))],
+            ),
+            make_rule(
+                make_atom("path", vec![var("X"), var("Y")]),
+                vec![Literal::Positive(make_atom("edge", vec![var("X"), var("Y")]))],
+            ),
+        ];
+
+        let result = stratified_evaluation(&rules, db).unwrap();
+
+        // Should work fine, just derive the same fact twice (deduped by HashSet)
+        assert!(result.contains(&make_atom("path", vec![atom_const("a"), atom_const("b")])));
+        // Check we don't have extra facts
+        let path_facts = result.get_by_predicate(&Intern::new("path".to_string()));
+        assert_eq!(path_facts.len(), 1);
+    }
+
+    // ===== Variables in Negated Compound Terms Tests =====
+
+    #[test]
+    fn test_negated_compound_term_safe() {
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("item", vec![atom_const("sword")]));
+        db.insert(make_atom("item", vec![atom_const("shield")]));
+        db.insert(make_atom(
+            "dangerous",
+            vec![Term::Compound(
+                Intern::new("property".to_string()),
+                vec![atom_const("sword"), atom_const("sharp")],
+            )],
+        ));
+
+        // safe_item(X) :- item(X), not dangerous(property(X, sharp)).
+        let rules = vec![make_rule(
+            make_atom("safe_item", vec![var("X")]),
+            vec![
+                Literal::Positive(make_atom("item", vec![var("X")])),
+                Literal::Negative(make_atom(
+                    "dangerous",
+                    vec![Term::Compound(
+                        Intern::new("property".to_string()),
+                        vec![var("X"), atom_const("sharp")],
+                    )],
+                )),
+            ],
+        )];
+
+        let result = stratified_evaluation(&rules, db).unwrap();
+
+        // shield is safe (no dangerous(property(shield, sharp)))
+        assert!(result.contains(&make_atom("safe_item", vec![atom_const("shield")])));
+        // sword is not safe (dangerous(property(sword, sharp)) exists)
+        assert!(!result.contains(&make_atom("safe_item", vec![atom_const("sword")])));
+    }
+
+    #[test]
+    fn test_nested_compound_in_negation() {
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("player", vec![atom_const("alice")]));
+        db.insert(make_atom("player", vec![atom_const("bob")]));
+        db.insert(make_atom(
+            "has_item",
+            vec![
+                atom_const("alice"),
+                Term::Compound(
+                    Intern::new("item".to_string()),
+                    vec![
+                        atom_const("weapon"),
+                        Term::Compound(
+                            Intern::new("stats".to_string()),
+                            vec![int(10), int(5)],
+                        ),
+                    ],
+                ),
+            ],
+        ));
+
+        // First, derive who has weapons
+        // has_weapon(P) :- has_item(P, item(weapon, stats(D, W))).
+        // Then: unarmed(P) :- player(P), not has_weapon(P).
+        let rules = vec![
+            make_rule(
+                make_atom("has_weapon", vec![var("P")]),
+                vec![Literal::Positive(make_atom(
+                    "has_item",
+                    vec![
+                        var("P"),
+                        Term::Compound(
+                            Intern::new("item".to_string()),
+                            vec![
+                                atom_const("weapon"),
+                                Term::Compound(
+                                    Intern::new("stats".to_string()),
+                                    vec![var("D"), var("W")],
+                                ),
+                            ],
+                        ),
+                    ],
+                ))],
+            ),
+            make_rule(
+                make_atom("unarmed", vec![var("P")]),
+                vec![
+                    Literal::Positive(make_atom("player", vec![var("P")])),
+                    Literal::Negative(make_atom("has_weapon", vec![var("P")])),
+                ],
+            ),
+        ];
+
+        let result = stratified_evaluation(&rules, db).unwrap();
+
+        // bob is unarmed (no weapon)
+        assert!(result.contains(&make_atom("unarmed", vec![atom_const("bob")])));
+        // alice is NOT unarmed (has weapon)
+        assert!(!result.contains(&make_atom("unarmed", vec![atom_const("alice")])));
+    }
+
+    // ===== Deep Nesting Stress Test =====
+
+    #[test]
+    fn test_very_deep_nested_compound() {
+        let mut db = FactDatabase::new();
+
+        // Create deeply nested term: nest(nest(nest(nest(nest(value)))))
+        let mut deep_term = atom_const("value");
+        for _ in 0..10 {
+            deep_term = Term::Compound(Intern::new("nest".to_string()), vec![deep_term]);
+        }
+
+        db.insert(make_atom("deep", vec![deep_term.clone()]));
+
+        // Query for it
+        let query = make_atom("deep", vec![var("X")]);
+        let results = db.query(&query);
+
+        assert_eq!(results.len(), 1);
+        // Verify the term structure is preserved
+        if let Some(subst) = results.get(0) {
+            let bound_term = subst.apply(&Term::Variable(Intern::new("X".to_string())));
+            assert_eq!(bound_term, deep_term);
+        }
+    }
+
+    #[test]
+    fn test_deep_nesting_in_rules() {
+        let mut db = FactDatabase::new();
+
+        // wrapper(wrap(X)) :- value(X).
+        db.insert(make_atom("value", vec![atom_const("a")]));
+
+        let mut rules = Vec::new();
+        // Create rules that progressively wrap the value
+        for i in 0..5 {
+            let predicate = format!("level{}", i);
+            let next_predicate = format!("level{}", i + 1);
+
+            rules.push(make_rule(
+                make_atom(&next_predicate, vec![
+                    Term::Compound(Intern::new("wrap".to_string()), vec![var("X")])
+                ]),
+                vec![Literal::Positive(make_atom(&predicate, vec![var("X")]))],
+            ));
+        }
+
+        // Base: level0(X) :- value(X).
+        rules.insert(
+            0,
+            make_rule(
+                make_atom("level0", vec![var("X")]),
+                vec![Literal::Positive(make_atom("value", vec![var("X")]))],
+            ),
+        );
+
+        let result = stratified_evaluation(&rules, db).unwrap();
+
+        // Should derive level5(wrap(wrap(wrap(wrap(wrap(a))))))
+        let mut expected = atom_const("a");
+        for _ in 0..5 {
+            expected = Term::Compound(Intern::new("wrap".to_string()), vec![expected]);
+        }
+
+        assert!(result.contains(&make_atom("level5", vec![expected])));
+    }
+
+    // ===== Long Recursive Chain Stress Test =====
+
+    #[test]
+    fn test_very_long_chain() {
+        let mut db = FactDatabase::new();
+
+        // Create a long chain: n0->n1->n2->...->n100
+        for i in 0..100 {
+            let from = format!("n{}", i);
+            let to = format!("n{}", i + 1);
+            db.insert(make_atom("edge", vec![atom_const(&from), atom_const(&to)]));
+        }
+
+        // path(X, Y) :- edge(X, Y).
+        // path(X, Z) :- path(X, Y), edge(Y, Z).
+        let rules = vec![
+            make_rule(
+                make_atom("path", vec![var("X"), var("Y")]),
+                vec![Literal::Positive(make_atom("edge", vec![var("X"), var("Y")]))],
+            ),
+            make_rule(
+                make_atom("path", vec![var("X"), var("Z")]),
+                vec![
+                    Literal::Positive(make_atom("path", vec![var("X"), var("Y")])),
+                    Literal::Positive(make_atom("edge", vec![var("Y"), var("Z")])),
+                ],
+            ),
+        ];
+
+        let result = stratified_evaluation(&rules, db).unwrap();
+
+        // Should be able to reach from n0 to n100
+        assert!(result.contains(&make_atom("path", vec![atom_const("n0"), atom_const("n100")])));
+
+        // Should have path(n0, nX) for all X from 1 to 100
+        let path_pred = Intern::new("path".to_string());
+        let paths = result.get_by_predicate(&path_pred);
+
+        // We have 100 edges, so we should have:
+        // - 100 direct paths
+        // - 99 paths of length 2
+        // - 98 paths of length 3
+        // - ...
+        // - 1 path of length 100
+        // Total = 100 + 99 + 98 + ... + 1 = 100*101/2 = 5050
+        assert_eq!(paths.len(), 5050);
+    }
+
+    #[test]
+    fn test_long_chain_with_stats() {
+        let mut db = FactDatabase::new();
+
+        // Create a chain of 50 nodes
+        for i in 0..50 {
+            let from = format!("n{}", i);
+            let to = format!("n{}", i + 1);
+            db.insert(make_atom("edge", vec![atom_const(&from), atom_const(&to)]));
+        }
+
+        let rules = vec![
+            make_rule(
+                make_atom("path", vec![var("X"), var("Y")]),
+                vec![Literal::Positive(make_atom("edge", vec![var("X"), var("Y")]))],
+            ),
+            make_rule(
+                make_atom("path", vec![var("X"), var("Z")]),
+                vec![
+                    Literal::Positive(make_atom("path", vec![var("X"), var("Y")])),
+                    Literal::Positive(make_atom("edge", vec![var("Y"), var("Z")])),
+                ],
+            ),
+        ];
+
+        let (result, stats) = semi_naive_evaluation_instrumented(&rules, db);
+
+        // Check that semi-naive is efficient
+        // Should converge in approximately 50 iterations (length of chain)
+        println!("Long chain (50 nodes) stats: {} iterations", stats.iterations);
+        assert!(stats.iterations < 100, "Too many iterations: {}", stats.iterations);
+
+        // Verify correctness
+        assert!(result.contains(&make_atom("path", vec![atom_const("n0"), atom_const("n50")])));
     }
 }

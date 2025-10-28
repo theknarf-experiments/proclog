@@ -5,6 +5,7 @@ mod database;
 mod grounding;
 mod evaluation;
 mod stratification;
+mod safety;
 
 fn main() {
     println!("ProcLog - Datalog for Procedural Generation\n");

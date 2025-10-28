@@ -22,7 +22,7 @@ pub fn ground_rule(rule: &Rule, db: &FactDatabase) -> Vec<Atom> {
 }
 
 /// Find all substitutions that satisfy a conjunction of literals
-fn satisfy_body(body: &[Literal], db: &FactDatabase) -> Vec<Substitution> {
+pub fn satisfy_body(body: &[Literal], db: &FactDatabase) -> Vec<Substitution> {
     if body.is_empty() {
         // Empty body is trivially satisfied with empty substitution
         return vec![Substitution::new()];
