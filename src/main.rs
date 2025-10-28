@@ -4,6 +4,7 @@ mod unification;
 mod database;
 mod grounding;
 mod evaluation;
+mod stratification;
 
 fn main() {
     println!("ProcLog - Datalog for Procedural Generation\n");

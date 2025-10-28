@@ -65,10 +65,42 @@ fn satisfy_body(body: &[Literal], db: &FactDatabase) -> Vec<Substitution> {
                 all_substs
             }
         }
-        Literal::Negative(_atom) => {
-            // TODO: Handle negation (will implement in stratification phase)
-            // For now, just ignore negative literals
-            satisfy_body(rest, db)
+        Literal::Negative(atom) => {
+            // Negation as failure: the atom must NOT unify with any fact in the database
+            // For each substitution from the rest of the body,
+            // check that the atom (with substitution applied) doesn't match any fact
+
+            if rest.is_empty() {
+                // No more literals - check if the negated atom is NOT in the database
+                let matches = db.query(atom);
+                if matches.is_empty() {
+                    // Atom is not in the database - negation succeeds with empty substitution
+                    vec![Substitution::new()]
+                } else {
+                    // Atom is in the database - negation fails
+                    vec![]
+                }
+            } else {
+                // Process the rest first, then filter by negation
+                let rest_substs = satisfy_body(rest, db);
+                let mut result = Vec::new();
+
+                for subst in rest_substs {
+                    // Apply substitution to the negated atom
+                    let ground_atom = subst.apply_atom(atom);
+
+                    // Check if this ground atom exists in the database
+                    let matches = db.query(&ground_atom);
+
+                    if matches.is_empty() {
+                        // Atom doesn't exist - negation succeeds
+                        result.push(subst);
+                    }
+                    // If atom exists, negation fails - don't include this substitution
+                }
+
+                result
+            }
         }
     }
 }
@@ -176,8 +208,36 @@ fn satisfy_body_mixed_recursive(
                 all_substs
             }
         }
-        Literal::Negative(_atom) => {
-            satisfy_body_mixed_recursive(rest, delta, full_db, delta_pos, current_pos + 1)
+        Literal::Negative(atom) => {
+            // Negation uses full_db (not delta) - we need the complete view
+            if rest.is_empty() {
+                let matches = full_db.query(atom);
+                if matches.is_empty() {
+                    vec![Substitution::new()]
+                } else {
+                    vec![]
+                }
+            } else {
+                let rest_substs = satisfy_body_mixed_recursive(
+                    rest,
+                    delta,
+                    full_db,
+                    delta_pos,
+                    current_pos + 1,
+                );
+                let mut result = Vec::new();
+
+                for subst in rest_substs {
+                    let ground_atom = subst.apply_atom(atom);
+                    let matches = full_db.query(&ground_atom);
+
+                    if matches.is_empty() {
+                        result.push(subst);
+                    }
+                }
+
+                result
+            }
         }
     }
 }
@@ -363,6 +423,89 @@ mod tests {
     }
 
     // Integration test: Parse → Load Facts → Ground Rules → Query
+    // Negation tests
+    #[test]
+    fn test_ground_rule_simple_negation() {
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("bird", vec![atom_const("tweety")]));
+        db.insert(make_atom("bird", vec![atom_const("polly")]));
+        db.insert(make_atom("penguin", vec![atom_const("polly")]));
+
+        // Rule: flies(X) :- bird(X), not penguin(X).
+        let rule = make_rule(
+            make_atom("flies", vec![var("X")]),
+            vec![
+                Literal::Positive(make_atom("bird", vec![var("X")])),
+                Literal::Negative(make_atom("penguin", vec![var("X")])),
+            ],
+        );
+
+        let results = ground_rule(&rule, &db);
+
+        // Only tweety should fly (polly is a penguin)
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].terms[0], atom_const("tweety"));
+    }
+
+    #[test]
+    fn test_ground_rule_negation_no_match() {
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("bird", vec![atom_const("tweety")]));
+
+        // Rule: mammal(X) :- not bird(X).
+        // Since only tweety exists and is a bird, no mammals
+        let rule = make_rule(
+            make_atom("mammal", vec![var("X")]),
+            vec![Literal::Negative(make_atom("bird", vec![var("X")]))],
+        );
+
+        let results = ground_rule(&rule, &db);
+
+        // No results - we can't prove something is NOT a bird
+        // unless we have a closed world assumption with a finite domain
+        assert_eq!(results.len(), 0);
+    }
+
+    #[test]
+    fn test_ground_rule_negation_with_ground_term() {
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("bird", vec![atom_const("tweety")]));
+
+        // Rule: not_bird_polly :- not bird(polly).
+        let rule = make_rule(
+            make_atom("not_bird_polly", vec![]),
+            vec![Literal::Negative(make_atom("bird", vec![atom_const("polly")]))],
+        );
+
+        let results = ground_rule(&rule, &db);
+
+        // polly is not a bird, so this succeeds
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_ground_rule_multiple_negations() {
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("a", vec![atom_const("x")]));
+        db.insert(make_atom("b", vec![atom_const("y")]));
+        db.insert(make_atom("c", vec![atom_const("z")]));
+
+        // Rule: result :- not a(y), not b(x), not c(w).
+        let rule = make_rule(
+            make_atom("result", vec![]),
+            vec![
+                Literal::Negative(make_atom("a", vec![atom_const("y")])),
+                Literal::Negative(make_atom("b", vec![atom_const("x")])),
+                Literal::Negative(make_atom("c", vec![atom_const("w")])),
+            ],
+        );
+
+        let results = ground_rule(&rule, &db);
+
+        // All negations succeed
+        assert_eq!(results.len(), 1);
+    }
+
     #[test]
     fn test_integration_parse_ground_query() {
         use crate::parser;

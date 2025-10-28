@@ -24,14 +24,14 @@ pub struct Fact {
 }
 
 /// A rule has a head and a body: `ancestor(X, Y) :- parent(X, Y).`
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rule {
     pub head: Atom,
     pub body: Vec<Literal>,
 }
 
 /// A constraint has no head, only a body: `:- unsafe(X).`
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Constraint {
     pub body: Vec<Literal>,
 }
@@ -44,7 +44,7 @@ pub struct ProbFact {
 }
 
 /// A literal is either a positive or negative atom
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Literal {
     Positive(Atom),
     Negative(Atom),
