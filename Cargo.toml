@@ -1,0 +1,11 @@
+[package]
+name = "proclog"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+chumsky = "0.9"
+internment = "0.8"
+ariadne = "0.4"
+
+[dev-dependencies]

@@ -1,0 +1,27 @@
+/*
+ * Dungeon Generation Example
+ * This demonstrates ProcLog syntax for procedural dungeon generation
+ */
+
+% Initial facts - define the starting room
+entrance(room_0).
+total_rooms(10).
+
+% Probabilistic facts - room types with probabilities
+0.5 :: room_type(small).
+0.3 :: room_type(large).
+0.15 :: room_type(treasure).
+0.05 :: room_type(boss).
+
+% Rules - define room connections
+connected(R1, R2) :- adjacent(R1, R2).
+reachable(R1, R2) :- connected(R1, R2).
+reachable(R1, R3) :- reachable(R1, R2), connected(R2, R3).
+
+% Rules - treasure must have a key
+has_key(Player, treasure_room) :- found_key(Player, treasure_key), in_room(Player, key_room).
+
+% Constraints - game design rules
+:- room(R, treasure), not reachable(entrance, R).
+:- room(R, boss), not has_key(player, boss_key).
+:- room(R, _), not reachable(entrance, R).

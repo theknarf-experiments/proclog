@@ -1,0 +1,100 @@
+/*
+ * ProcLog Datatypes Example
+ * This file demonstrates all supported datatypes in ProcLog
+ */
+
+/* ===== INTEGERS ===== */
+% Positive integers
+level(1).
+max_health(100).
+score(9999).
+
+% Negative integers
+temperature(-5).
+debt(-1000).
+
+% Zero
+balance(0).
+
+/* ===== FLOATS ===== */
+% Positive floats
+pi(3.14159).
+speed(25.5).
+decimal(10.0).
+
+% Negative floats
+velocity(-9.8).
+offset(-2.5).
+
+/* ===== BOOLEANS ===== */
+% True and false
+is_active(player1, true).
+is_locked(door1, false).
+game_over(false).
+debug_mode(true).
+
+/* ===== STRINGS ===== */
+% Regular strings
+name(player1, "Alice").
+message("Hello, World!").
+description("A rusty old sword").
+
+% Empty string
+username("").
+
+/* ===== ATOMS ===== */
+% Symbolic identifiers
+type(player1, warrior).
+type(player2, mage).
+state(game, running).
+color(red).
+direction(north).
+
+/* ===== VARIABLES ===== */
+% Uppercase variables
+has_item(Player, sword) :- inventory(Player, sword).
+distance(X, Y, D) :- position(X, Px), position(Y, Py), dist(Px, Py, D).
+
+% Underscore variables (anonymous or private)
+can_move(Player) :- position(Player, _x, _y), is_active(Player, true).
+process(_tmp) :- _internal_state(_tmp).
+
+/* ===== COMPOUND TERMS ===== */
+% Nested structures
+inventory(player1, item(sword, 10, 5.5)).
+inventory(player1, item(potion, 3, 2.0)).
+
+position(player1, coord(10, 20, 0)).
+position(enemy1, coord(-5, 15, 10)).
+
+% Deeply nested
+quest(player1, chain(
+    step(goto, coord(10, 20)),
+    step(talk, npc("Elder")),
+    step(collect, item(artifact, 1, 0.0))
+)).
+
+/* ===== MIXED DATATYPES IN RULES ===== */
+% All datatypes in one rule
+valid_attack(Attacker, Target, Damage, Critical) :-
+    is_active(Attacker, true),                    % boolean
+    is_active(Target, true),                      % boolean
+    position(Attacker, coord(Ax, Ay, _az)),       % compound + variables
+    position(Target, coord(Tx, Ty, _tz)),         % compound + variables
+    distance(Ax, Ay, Tx, Ty, Dist),               % variables
+    Dist < 5.0,                                   % float comparison
+    weapon(Attacker, W),                          % atom
+    damage_value(W, Damage),                      % integer
+    critical_hit(Critical),                       % boolean
+    not is_friendly(Attacker, Target).            % negation
+
+/* ===== PROBABILISTIC FACTS WITH DATATYPES ===== */
+0.7 :: loot(gold, 100).                           % 70% chance of 100 gold
+0.3 :: loot(sword, 1).                            % 30% chance of sword
+0.1 :: special_event("Dragon Attack!").           % 10% chance of event
+
+/* ===== CONSTRAINTS ===== */
+% Type safety constraints
+:- health(Player, H), H < 0.                      % Health can't be negative
+:- level(Player, L), L > 100.                     % Max level is 100
+:- position(Entity, coord(X, Y, Z)), not valid_coord(X, Y, Z).
