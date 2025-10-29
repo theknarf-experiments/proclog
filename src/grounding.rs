@@ -426,6 +426,60 @@ pub fn ground_choice_rule(
     result
 }
 
+/// Ground a choice rule, splitting by body substitutions
+/// Returns Vec<Vec<Atom>> where each inner Vec is an independent choice group
+///
+/// If the choice rule has no body, returns a single group with all grounded atoms.
+/// If the choice rule has a body that grounds to N substitutions,
+/// returns N groups, one per body substitution.
+///
+/// Example:
+/// ```
+/// % 1 { has_weapon(P, W) : weapon(W) } 1 :- player(P).
+/// % With player(alice), player(bob), weapon(sword), weapon(bow)
+/// % Returns:
+/// % [ [has_weapon(alice, sword), has_weapon(alice, bow)],
+/// %   [has_weapon(bob, sword), has_weapon(bob, bow)] ]
+/// ```
+pub fn ground_choice_rule_split(
+    choice: &ChoiceRule,
+    db: &FactDatabase,
+    const_env: &ConstantEnv,
+) -> Vec<Vec<Atom>> {
+    // Get all body substitutions
+    let body_substs = if choice.body.is_empty() {
+        vec![Substitution::new()]
+    } else {
+        satisfy_body(&choice.body, db)
+    };
+
+    // Create one group per body substitution
+    let mut groups = Vec::new();
+
+    for body_subst in body_substs {
+        let mut group = Vec::new();
+
+        // Ground each choice element with this body substitution
+        for element in &choice.elements {
+            // Apply body substitution to element
+            let element_with_body_subst = ChoiceElement {
+                atom: body_subst.apply_atom(&element.atom),
+                condition: element.condition.iter()
+                    .map(|lit| apply_subst_to_literal(&body_subst, lit))
+                    .collect(),
+            };
+
+            // Ground this element
+            let grounded = ground_choice_element(&element_with_body_subst, db, const_env);
+            group.extend(grounded);
+        }
+
+        groups.push(group);
+    }
+
+    groups
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1146,5 +1200,146 @@ mod tests {
             Term::Constant(Value::Integer(7)) => {},
             other => panic!("Expected large(7), got large({:?})", other),
         }
+    }
+
+    // Tests for choice rule body splitting
+    #[test]
+    fn test_ground_choice_rule_no_body_returns_single_group() {
+        // Choice rule with no body: { selected(X) : item(X) }.
+        // Should return ONE group containing all grounded atoms
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("item", vec![atom_const("a")]));
+        db.insert(make_atom("item", vec![atom_const("b")]));
+
+        let const_env = ConstantEnv::new();
+
+        let choice = ChoiceRule {
+            lower_bound: None,
+            upper_bound: None,
+            elements: vec![ChoiceElement {
+                atom: make_atom("selected", vec![var("X")]),
+                condition: vec![Literal::Positive(make_atom("item", vec![var("X")]))],
+            }],
+            body: vec![], // NO BODY
+        };
+
+        // Current function returns Vec<Atom>, but we need Vec<Vec<Atom>>
+        // For now, test what we have
+        let result = ground_choice_rule(&choice, &db, &const_env);
+
+        // Should have 2 atoms: selected(a), selected(b)
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_ground_choice_rule_with_body_should_split() {
+        // Choice rule with body: 1 { has_weapon(P, W) : weapon(W) } 1 :- player(P).
+        // Should return TWO groups (one per player)
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("player", vec![atom_const("alice")]));
+        db.insert(make_atom("player", vec![atom_const("bob")]));
+        db.insert(make_atom("weapon", vec![atom_const("sword")]));
+        db.insert(make_atom("weapon", vec![atom_const("bow")]));
+
+        let const_env = ConstantEnv::new();
+
+        let choice = ChoiceRule {
+            lower_bound: Some(1),
+            upper_bound: Some(1),
+            elements: vec![ChoiceElement {
+                atom: make_atom("has_weapon", vec![var("P"), var("W")]),
+                condition: vec![Literal::Positive(make_atom("weapon", vec![var("W")]))],
+            }],
+            body: vec![Literal::Positive(make_atom("player", vec![var("P")]))],
+        };
+
+        // Current implementation - returns flat list of 4 atoms
+        let result = ground_choice_rule(&choice, &db, &const_env);
+
+        // Currently returns 4 atoms (all combined)
+        assert_eq!(result.len(), 4);
+
+        // But we WANT 2 groups of 2 atoms each
+        // This test documents the CURRENT (incorrect) behavior
+        // We'll add a new function that returns Vec<Vec<Atom>>
+    }
+
+    #[test]
+    fn test_ground_choice_rule_split_no_body() {
+        // NEW FUNCTION: ground_choice_rule_split
+        // With no body, should return single group
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("item", vec![atom_const("a")]));
+        db.insert(make_atom("item", vec![atom_const("b")]));
+
+        let const_env = ConstantEnv::new();
+
+        let choice = ChoiceRule {
+            lower_bound: None,
+            upper_bound: None,
+            elements: vec![ChoiceElement {
+                atom: make_atom("selected", vec![var("X")]),
+                condition: vec![Literal::Positive(make_atom("item", vec![var("X")]))],
+            }],
+            body: vec![],
+        };
+
+        let result = ground_choice_rule_split(&choice, &db, &const_env);
+
+        // Should return 1 group with 2 atoms
+        assert_eq!(result.len(), 1, "Expected 1 group");
+        assert_eq!(result[0].len(), 2, "Expected 2 atoms in the group");
+
+        // Verify atoms
+        let atoms: Vec<String> = result[0].iter()
+            .map(|a| format!("{:?}", a.predicate))
+            .collect();
+        assert!(atoms.iter().all(|s| s.contains("selected")));
+    }
+
+    #[test]
+    fn test_ground_choice_rule_split_with_body() {
+        // NEW FUNCTION: ground_choice_rule_split
+        // With body that grounds to 2 substitutions, should return 2 groups
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("player", vec![atom_const("alice")]));
+        db.insert(make_atom("player", vec![atom_const("bob")]));
+        db.insert(make_atom("weapon", vec![atom_const("sword")]));
+        db.insert(make_atom("weapon", vec![atom_const("bow")]));
+
+        let const_env = ConstantEnv::new();
+
+        let choice = ChoiceRule {
+            lower_bound: Some(1),
+            upper_bound: Some(1),
+            elements: vec![ChoiceElement {
+                atom: make_atom("has_weapon", vec![var("P"), var("W")]),
+                condition: vec![Literal::Positive(make_atom("weapon", vec![var("W")]))],
+            }],
+            body: vec![Literal::Positive(make_atom("player", vec![var("P")]))],
+        };
+
+        let result = ground_choice_rule_split(&choice, &db, &const_env);
+
+        // Should return 2 groups (one per player)
+        assert_eq!(result.len(), 2, "Expected 2 groups (one per player)");
+
+        // Each group should have 2 atoms (one per weapon)
+        assert_eq!(result[0].len(), 2, "Expected 2 atoms in first group");
+        assert_eq!(result[1].len(), 2, "Expected 2 atoms in second group");
+
+        // Verify first group is for one player (either alice or bob)
+        let first_group_player = &result[0][0].terms[0];
+        assert!(result[0].iter().all(|atom| &atom.terms[0] == first_group_player),
+            "All atoms in first group should be for same player");
+
+        // Verify second group is for the other player
+        let second_group_player = &result[1][0].terms[0];
+        assert!(result[1].iter().all(|atom| &atom.terms[0] == second_group_player),
+            "All atoms in second group should be for same player");
+
+        // Verify different players
+        assert_ne!(first_group_player, second_group_player,
+            "Each group should be for a different player");
     }
 }

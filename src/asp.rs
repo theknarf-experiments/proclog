@@ -176,27 +176,34 @@ pub fn asp_evaluation(program: &Program) -> Vec<AnswerSet> {
     }
 
     // Ground each choice rule independently and generate its subsets
+    // IMPORTANT: Split choice rules by body substitutions to create
+    // independent choices for each body grounding
     let mut choice_rule_subsets: Vec<Vec<Vec<Atom>>> = Vec::new();
 
     for choice in &choice_rules {
         // Use derived_db so choice conditions can query derived facts
-        let grounded = ground_choice_rule(choice, &derived_db, &const_env);
+        // This returns Vec<Vec<Atom>> where each inner Vec is a group
+        // for one body substitution
+        let groups = crate::grounding::ground_choice_rule_split(choice, &derived_db, &const_env);
 
-        // Remove duplicates within this choice rule
-        let unique_atoms: Vec<Atom> = grounded.into_iter()
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect();
+        // For each group (body substitution), create an independent choice
+        for group in groups {
+            // Remove duplicates within this group
+            let unique_atoms: Vec<Atom> = group.into_iter()
+                .collect::<HashSet<_>>()
+                .into_iter()
+                .collect();
 
-        // Determine bounds for this specific choice rule
-        let min_size = choice.lower_bound.unwrap_or(0) as usize;
-        let max_size = choice.upper_bound
-            .map(|u| u as usize)
-            .unwrap_or(unique_atoms.len());
+            // Determine bounds for this specific choice rule
+            let min_size = choice.lower_bound.unwrap_or(0) as usize;
+            let max_size = choice.upper_bound
+                .map(|u| u as usize)
+                .unwrap_or(unique_atoms.len());
 
-        // Generate all valid subsets for this choice rule
-        let subsets = generate_subsets(&unique_atoms, min_size, max_size);
-        choice_rule_subsets.push(subsets);
+            // Generate all valid subsets for this group
+            let subsets = generate_subsets(&unique_atoms, min_size, max_size);
+            choice_rule_subsets.push(subsets);
+        }
     }
 
     // Generate cartesian product of all choice rule subsets
@@ -1002,12 +1009,12 @@ mod tests {
         let program = parse_program(input).unwrap();
         let answer_sets = asp_evaluation(&program);
 
-        // KNOWN LIMITATION: Choice rules with bodies that ground to multiple instances
-        // are treated as ONE choice rule instead of MULTIPLE independent choices
-        // Expected: 2 players × 2 weapons = 4, minus 1 invalid = 3 answer sets
-        // Current: Treats all 4 atoms as one choice pool with bounds [1,1] = 2 answer sets
-        // TODO: Split choice rules by body grounding
-        assert_eq!(answer_sets.len(), 2);
+        // FIXED! Choice rules with bodies now split by body substitutions
+        // Expected: 2 players × 2 weapons = 4 total combinations
+        // Each player chooses 1 weapon independently (2×2 = 4 possibilities)
+        // Constraint eliminates 1: not (alice with bow AND bob with bow)
+        // Result: 3 valid answer sets
+        assert_eq!(answer_sets.len(), 3);
 
         // Verify every answer set has at least one player with sword
         for as_set in &answer_sets {
@@ -1317,6 +1324,197 @@ mod tests {
             let is_complete = as_set.atoms.iter().any(|a|
                 a.predicate == Intern::new("complete".to_string()));
             assert!(!is_complete, "Complete cycles should be eliminated");
+        }
+    }
+
+    // Integration tests for choice rules with bodies (body splitting feature)
+    #[test]
+    fn test_choice_body_simple_split() {
+        // Simple case: Each entity makes one independent choice
+        let input = r#"
+            entity(a).
+            entity(b).
+            option(x).
+            option(y).
+
+            % Each entity chooses exactly 1 option
+            1 { choice(E, O) : option(O) } 1 :- entity(E).
+        "#;
+
+        let program = parse_program(input).unwrap();
+        let answer_sets = asp_evaluation(&program);
+
+        // 2 entities, each chooses 1 from 2 options
+        // 2 × 2 = 4 answer sets
+        assert_eq!(answer_sets.len(), 4);
+
+        // Verify each answer set has exactly 2 choices (one per entity)
+        for as_set in &answer_sets {
+            let choice_count = as_set.atoms.iter()
+                .filter(|a| a.predicate == Intern::new("choice".to_string()))
+                .count();
+            assert_eq!(choice_count, 2, "Each answer set should have 2 choices");
+        }
+    }
+
+    #[test]
+    fn test_choice_body_three_entities() {
+        // Scale up: 3 entities, 2 options each
+        let input = r#"
+            entity(a).
+            entity(b).
+            entity(c).
+            option(x).
+            option(y).
+
+            1 { choice(E, O) : option(O) } 1 :- entity(E).
+        "#;
+
+        let program = parse_program(input).unwrap();
+        let answer_sets = asp_evaluation(&program);
+
+        // 3 entities, each chooses 1 from 2 options
+        // 2 × 2 × 2 = 8 answer sets
+        assert_eq!(answer_sets.len(), 8);
+
+        // Verify each has 3 choices
+        for as_set in &answer_sets {
+            let choice_count = as_set.atoms.iter()
+                .filter(|a| a.predicate == Intern::new("choice".to_string()))
+                .count();
+            assert_eq!(choice_count, 3);
+        }
+    }
+
+    #[test]
+    fn test_choice_body_variable_options() {
+        // Each player chooses from 3 weapons
+        let input = r#"
+            player(alice).
+            player(bob).
+            weapon(sword).
+            weapon(bow).
+            weapon(staff).
+
+            1 { has(P, W) : weapon(W) } 1 :- player(P).
+        "#;
+
+        let program = parse_program(input).unwrap();
+        let answer_sets = asp_evaluation(&program);
+
+        // 2 players, each chooses 1 from 3 weapons
+        // 3 × 3 = 9 answer sets
+        assert_eq!(answer_sets.len(), 9);
+    }
+
+    #[test]
+    fn test_choice_body_with_constraint() {
+        // Choices with body + constraint on chosen values
+        let input = r#"
+            player(alice).
+            player(bob).
+            weapon(sword).
+            weapon(bow).
+
+            1 { has(P, W) : weapon(W) } 1 :- player(P).
+
+            % Constraint: at least one player must have sword
+            :- not has(alice, sword), not has(bob, sword).
+        "#;
+
+        let program = parse_program(input).unwrap();
+        let answer_sets = asp_evaluation(&program);
+
+        // 2 × 2 = 4 combinations, minus 1 invalid (neither has sword)
+        // 4 - 1 = 3 answer sets
+        assert_eq!(answer_sets.len(), 3);
+
+        // Verify constraint: at least one has sword
+        for as_set in &answer_sets {
+            let someone_has_sword = as_set.atoms.iter().any(|a| {
+                a.predicate == Intern::new("has".to_string()) &&
+                a.terms.get(1) == Some(&Term::Constant(Value::Atom(Intern::new("sword".to_string()))))
+            });
+            assert!(someone_has_sword);
+        }
+    }
+
+    #[test]
+    fn test_choice_body_unbounded() {
+        // Unbounded choice: each entity can choose any number
+        let input = r#"
+            entity(a).
+            entity(b).
+            option(x).
+            option(y).
+
+            % Each entity chooses 0 or more options
+            { choice(E, O) : option(O) } :- entity(E).
+        "#;
+
+        let program = parse_program(input).unwrap();
+        let answer_sets = asp_evaluation(&program);
+
+        // Each entity independently chooses a subset of 2 options
+        // 2^2 choices per entity = 4 per entity
+        // 2 entities: 4 × 4 = 16 answer sets
+        assert_eq!(answer_sets.len(), 16);
+    }
+
+    #[test]
+    fn test_choice_body_min_bound() {
+        // Each entity must choose at least 1
+        let input = r#"
+            entity(a).
+            entity(b).
+            option(x).
+            option(y).
+
+            1 { choice(E, O) : option(O) } :- entity(E).
+        "#;
+
+        let program = parse_program(input).unwrap();
+        let answer_sets = asp_evaluation(&program);
+
+        // Each entity chooses 1 or 2 from 2 options
+        // Per entity: C(2,1) + C(2,2) = 2 + 1 = 3 choices
+        // 2 entities: 3 × 3 = 9 answer sets
+        assert_eq!(answer_sets.len(), 9);
+    }
+
+    #[test]
+    fn test_choice_body_with_derived_base_facts() {
+        // Body uses derived facts from simple Datalog rules
+        let input = r#"
+            person(alice).
+            person(bob).
+            eligible(alice).
+            eligible(bob).
+
+            % Derived: special people are eligible persons
+            special(P) :- person(P), eligible(P).
+
+            option(x).
+            option(y).
+
+            % Each special person chooses an option
+            1 { choice(P, O) : option(O) } 1 :- special(P).
+        "#;
+
+        let program = parse_program(input).unwrap();
+        let answer_sets = asp_evaluation(&program);
+
+        // Both alice and bob are special
+        // 2 special people, each chooses 1 from 2 options
+        // 2 × 2 = 4 answer sets
+        assert_eq!(answer_sets.len(), 4);
+
+        // Verify each answer set has exactly 2 choices
+        for as_set in &answer_sets {
+            let choice_count = as_set.atoms.iter()
+                .filter(|a| a.predicate == Intern::new("choice".to_string()))
+                .count();
+            assert_eq!(choice_count, 2, "Should have 2 choices (one per special person)");
         }
     }
 }
