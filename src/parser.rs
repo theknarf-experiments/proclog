@@ -67,14 +67,79 @@ fn string_literal() -> impl Parser<char, String, Error = ParseError> + Clone {
         .labelled("string")
 }
 
-/// Parse a term (variable, constant, or compound)
+/// Parse an operator (comparison or arithmetic)
+fn operator() -> impl Parser<char, String, Error = ParseError> + Clone {
+    choice((
+        just("<=").to("<="),
+        just(">=").to(">="),
+        just("!=").to("!="),
+        just("\\=").to("\\="),
+        just("=<").to("=<"),  // Alternative syntax for <=
+        just("=").to("="),
+        just("<").to("<"),
+        just(">").to(">"),
+        just("+").to("+"),
+        just("-").to("-"),
+        just("*").to("*"),
+        just("/").to("/"),
+        just("mod").to("mod"),
+    ))
+    .map(|s| s.to_string())
+    .labelled("operator")
+}
+
+// This is now handled inline within term() to avoid circular dependency issues
+
+/// Parse a term (variable, constant, or compound) with arithmetic operator precedence
 fn term() -> impl Parser<char, Term, Error = ParseError> + Clone {
     recursive(|term| {
-        let variable = uppercase_ident()
-            .map(|s| Term::Variable(Intern::new(s)));
+        // Base factors: variables, numbers, strings, atoms, compound terms, parentheses
+        let factor = {
+            let variable = uppercase_ident()
+                .map(|s| Term::Variable(Intern::new(s)));
 
-        // Range: term..term (must parse before number to avoid conflict)
-        // We allow integers or lowercase identifiers (constants) in ranges
+            let number_const = number()
+                .map(|v| Term::Constant(v));
+
+            let string_const = string_literal()
+                .map(|s| Term::Constant(Value::String(Intern::new(s))));
+
+            // Parenthesized term
+            let parens = term.clone()
+                .delimited_by(just('(').padded(), just(')').padded());
+
+            // Compound term or atom (lowercase identifier with optional args)
+            let compound_or_atom = lowercase_ident()
+                .then(
+                    term.clone()
+                        .separated_by(just(',').padded())
+                        .delimited_by(just('(').padded(), just(')').padded())
+                        .or_not()
+                )
+                .map(|(name, args)| {
+                    if let Some(args) = args {
+                        Term::Compound(Intern::new(name), args)
+                    } else {
+                        match name.as_str() {
+                            "true" => Term::Constant(Value::Boolean(true)),
+                            "false" => Term::Constant(Value::Boolean(false)),
+                            _ => Term::Constant(Value::Atom(Intern::new(name))),
+                        }
+                    }
+                });
+
+            choice((
+                variable,
+                number_const,
+                string_const,
+                parens,
+                compound_or_atom,
+            ))
+            .padded()
+        };
+
+        // Check if we have a range (term..term) - must check before arithmetic
+        // Ranges can only have integer or atom constants as bounds
         let range_bound = choice((
             text::int(10)
                 .try_map(|s: String, span: std::ops::Range<usize>| {
@@ -87,45 +152,45 @@ fn term() -> impl Parser<char, Term, Error = ParseError> + Clone {
         ));
 
         let range = range_bound.clone()
-            .then_ignore(just(".."))
+            .then_ignore(just("..").padded())
             .then(range_bound)
             .map(|(start, end)| Term::Range(Box::new(start), Box::new(end)));
 
-        // Numbers (int or float, positive or negative)
-        let number_const = number()
-            .map(|v| Term::Constant(v));
-
-        let string_const = string_literal()
-            .map(|s| Term::Constant(Value::String(Intern::new(s))));
-
-        // Boolean, atom, or compound term
-        let bool_atom_or_compound = lowercase_ident()
-            .then(
-                term.clone()
-                    .separated_by(just(',').padded())
-                    .delimited_by(just('('), just(')'))
-                    .or_not()
-            )
-            .map(|(name, args)| {
-                if let Some(args) = args {
-                    // It's a compound term
-                    Term::Compound(Intern::new(name), args)
-                } else {
-                    // Check if it's a boolean keyword
-                    match name.as_str() {
-                        "true" => Term::Constant(Value::Boolean(true)),
-                        "false" => Term::Constant(Value::Boolean(false)),
-                        _ => Term::Constant(Value::Atom(Intern::new(name))),
-                    }
-                }
-            });
-
+        // Try range first, then arithmetic with precedence
         choice((
-            variable,
-            range,          // Parse range before number to avoid conflict with dots
-            number_const,
-            string_const,
-            bool_atom_or_compound,
+            range,
+            {
+                // Middle precedence: *, /, mod
+                let mul_div = factor.clone()
+                    .then(
+                        choice((
+                            just('*').to("*"),
+                            just('/').to("/"),
+                            just("mod").to("mod"),
+                        ))
+                        .padded()
+                        .then(factor.clone())
+                        .repeated()
+                    )
+                    .foldl(|left, (op, right)| {
+                        Term::Compound(Intern::new(op.to_string()), vec![left, right])
+                    });
+
+                // Lowest precedence: +, -
+                mul_div.clone()
+                    .then(
+                        choice((
+                            just('+').to("+"),
+                            just('-').to("-"),
+                        ))
+                        .padded()
+                        .then(mul_div)
+                        .repeated()
+                    )
+                    .foldl(|left, (op, right)| {
+                        Term::Compound(Intern::new(op.to_string()), vec![left, right])
+                    })
+            }
         ))
         .padded()
     })
@@ -134,7 +199,13 @@ fn term() -> impl Parser<char, Term, Error = ParseError> + Clone {
 
 /// Parse an atom
 fn atom() -> impl Parser<char, Atom, Error = ParseError> + Clone {
-    lowercase_ident()
+    // Parse either a regular identifier or an operator as the predicate
+    let predicate = choice((
+        lowercase_ident(),
+        operator(),
+    ));
+
+    predicate
         .then(
             term()
                 .separated_by(just(',').padded())
@@ -148,13 +219,37 @@ fn atom() -> impl Parser<char, Atom, Error = ParseError> + Clone {
         .labelled("atom")
 }
 
+/// Parse an infix comparison as an atom (e.g., X > 3, Y = 5)
+fn infix_comparison() -> impl Parser<char, Atom, Error = ParseError> + Clone {
+    term()
+        .then(choice((
+            just("<=").to("<="),
+            just(">=").to(">="),
+            just("!=").to("!="),
+            just("\\=").to("\\="),
+            just("=<").to("=<"),
+            just("=").to("="),
+            just("<").to("<"),
+            just(">").to(">"),
+        )).padded())
+        .then(term())
+        .map(|((left, op), right)| Atom {
+            predicate: Intern::new(op.to_string()),
+            terms: vec![left, right],
+        })
+}
+
 /// Parse a literal (positive or negative atom)
 fn literal() -> impl Parser<char, Literal, Error = ParseError> + Clone {
-    just("not")
+    let negated = just("not")
         .padded()
-        .ignore_then(atom())
-        .map(Literal::Negative)
-        .or(atom().map(Literal::Positive))
+        .ignore_then(choice((infix_comparison(), atom())))
+        .map(Literal::Negative);
+
+    let positive = choice((infix_comparison(), atom()))
+        .map(Literal::Positive);
+
+    negated.or(positive)
         .labelled("literal")
 }
 
@@ -1087,6 +1182,211 @@ mod tests {
                 assert_eq!(fact.atom.terms[0], range(1, 10));
             }
             _ => panic!("Expected fact"),
+        }
+    }
+
+    // Operator and arithmetic parsing tests
+    #[test]
+    fn test_parse_operator_as_predicate() {
+        let result = parse_program(">(X, 3).");
+        assert!(result.is_ok());
+        let program = result.unwrap();
+
+        match &program.statements[0] {
+            Statement::Fact(fact) => {
+                assert_eq!(fact.atom.predicate, Intern::new(">".to_string()));
+                assert_eq!(fact.atom.terms.len(), 2);
+            }
+            _ => panic!("Expected fact"),
+        }
+    }
+
+    #[test]
+    fn test_parse_infix_comparison() {
+        let result = parse_program("test :- X > 3.");
+        assert!(result.is_ok());
+        let program = result.unwrap();
+
+        match &program.statements[0] {
+            Statement::Rule(rule) => {
+                assert_eq!(rule.body.len(), 1);
+                match &rule.body[0] {
+                    Literal::Positive(atom) => {
+                        assert_eq!(atom.predicate, Intern::new(">".to_string()));
+                        assert_eq!(atom.terms.len(), 2);
+                        // Check that terms are correct
+                        match &atom.terms[0] {
+                            Term::Variable(v) => assert_eq!(*v, Intern::new("X".to_string())),
+                            _ => panic!("Expected variable X"),
+                        }
+                        match &atom.terms[1] {
+                            Term::Constant(Value::Integer(3)) => {},
+                            _ => panic!("Expected integer 3, got {:?}", atom.terms[1]),
+                        }
+                    }
+                    _ => panic!("Expected positive literal"),
+                }
+            }
+            _ => panic!("Expected rule"),
+        }
+    }
+
+    #[test]
+    fn test_parse_arithmetic_addition() {
+        // Note: X + Y is parsed as a compound term +(X, Y)
+        let result = parse_program("test(X + Y).");
+        assert!(result.is_ok());
+        let program = result.unwrap();
+
+        match &program.statements[0] {
+            Statement::Fact(fact) => {
+                assert_eq!(fact.atom.predicate, Intern::new("test".to_string()));
+                assert_eq!(fact.atom.terms.len(), 1);
+                match &fact.atom.terms[0] {
+                    Term::Compound(functor, args) => {
+                        assert_eq!(*functor, Intern::new("+".to_string()));
+                        assert_eq!(args.len(), 2);
+                    }
+                    _ => panic!("Expected compound term for addition"),
+                }
+            }
+            _ => panic!("Expected fact"),
+        }
+    }
+
+    #[test]
+    fn test_parse_arithmetic_precedence() {
+        // X + Y * 2 should parse as +(X, *(Y, 2))
+        let result = parse_program("test(X + Y * 2).");
+        assert!(result.is_ok());
+        let program = result.unwrap();
+
+        match &program.statements[0] {
+            Statement::Fact(fact) => {
+                match &fact.atom.terms[0] {
+                    Term::Compound(plus, args) => {
+                        assert_eq!(*plus, Intern::new("+".to_string()));
+                        assert_eq!(args.len(), 2);
+                        // Right side should be *(Y, 2)
+                        match &args[1] {
+                            Term::Compound(mult, mult_args) => {
+                                assert_eq!(*mult, Intern::new("*".to_string()));
+                                assert_eq!(mult_args.len(), 2);
+                            }
+                            _ => panic!("Expected multiplication on right side"),
+                        }
+                    }
+                    _ => panic!("Expected compound term"),
+                }
+            }
+            _ => panic!("Expected fact"),
+        }
+    }
+
+    #[test]
+    fn test_parse_parenthesized_arithmetic() {
+        // (X + Y) * 2 should parse as *((+(X, Y)), 2)
+        let result = parse_program("test((X + Y) * 2).");
+        assert!(result.is_ok());
+        let program = result.unwrap();
+
+        match &program.statements[0] {
+            Statement::Fact(fact) => {
+                match &fact.atom.terms[0] {
+                    Term::Compound(mult, args) => {
+                        assert_eq!(*mult, Intern::new("*".to_string()));
+                        assert_eq!(args.len(), 2);
+                        // Left side should be +(X, Y)
+                        match &args[0] {
+                            Term::Compound(plus, plus_args) => {
+                                assert_eq!(*plus, Intern::new("+".to_string()));
+                                assert_eq!(plus_args.len(), 2);
+                            }
+                            _ => panic!("Expected addition on left side"),
+                        }
+                    }
+                    _ => panic!("Expected compound term"),
+                }
+            }
+            _ => panic!("Expected fact"),
+        }
+    }
+
+    #[test]
+    fn test_parse_comparison_operators() {
+        let operators = vec!["<", ">", "<=", ">=", "=", "!="];
+        for op in operators {
+            let program = format!("test :- X {} 5.", op);
+            let result = parse_program(&program);
+            assert!(result.is_ok(), "Failed to parse operator: {}", op);
+
+            match &result.unwrap().statements[0] {
+                Statement::Rule(rule) => {
+                    match &rule.body[0] {
+                        Literal::Positive(atom) => {
+                            assert_eq!(atom.predicate, Intern::new(op.to_string()));
+                        }
+                        _ => panic!("Expected positive literal"),
+                    }
+                }
+                _ => panic!("Expected rule"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_arithmetic_in_rule_body() {
+        let result = parse_program("result(Z) :- X > 0, Y = X + 1, Z = Y * 2.");
+        assert!(result.is_ok());
+        let program = result.unwrap();
+
+        match &program.statements[0] {
+            Statement::Rule(rule) => {
+                assert_eq!(rule.body.len(), 3);
+
+                // First: X > 0
+                match &rule.body[0] {
+                    Literal::Positive(atom) => {
+                        assert_eq!(atom.predicate, Intern::new(">".to_string()));
+                    }
+                    _ => panic!("Expected comparison"),
+                }
+
+                // Second: Y = X + 1
+                match &rule.body[1] {
+                    Literal::Positive(atom) => {
+                        assert_eq!(atom.predicate, Intern::new("=".to_string()));
+                        match &atom.terms[1] {
+                            Term::Compound(plus, _) => {
+                                assert_eq!(*plus, Intern::new("+".to_string()));
+                            }
+                            _ => panic!("Expected addition"),
+                        }
+                    }
+                    _ => panic!("Expected comparison"),
+                }
+            }
+            _ => panic!("Expected rule"),
+        }
+    }
+
+    #[test]
+    fn test_parse_negated_comparison() {
+        let result = parse_program("test :- not X > 10.");
+        assert!(result.is_ok());
+        let program = result.unwrap();
+
+        match &program.statements[0] {
+            Statement::Rule(rule) => {
+                assert_eq!(rule.body.len(), 1);
+                match &rule.body[0] {
+                    Literal::Negative(atom) => {
+                        assert_eq!(atom.predicate, Intern::new(">".to_string()));
+                    }
+                    _ => panic!("Expected negative literal"),
+                }
+            }
+            _ => panic!("Expected rule"),
         }
     }
 }

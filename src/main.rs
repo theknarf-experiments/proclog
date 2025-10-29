@@ -8,9 +8,13 @@ mod stratification;
 mod safety;
 mod constants;
 mod asp;
+mod builtins;
 
 #[cfg(test)]
 mod asp_multiple_choice_tests;
+
+#[cfg(test)]
+mod arithmetic_integration_tests;
 
 fn main() {
     println!("ProcLog - Datalog for Procedural Generation\n");

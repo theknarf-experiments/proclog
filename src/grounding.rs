@@ -2,6 +2,7 @@ use crate::ast::{Rule, Atom, Literal, Term, Value, ChoiceRule, ChoiceElement};
 use crate::database::FactDatabase;
 use crate::unification::Substitution;
 use crate::constants::ConstantEnv;
+use crate::builtins;
 use internment::Intern;
 
 /// Ground a rule: generate all ground instances by substituting variables
@@ -35,35 +36,63 @@ pub fn satisfy_body(body: &[Literal], db: &FactDatabase) -> Vec<Substitution> {
 
     match first_literal {
         Literal::Positive(atom) => {
-            // Query the database for matches
-            let initial_substs = db.query(atom);
-
-            if rest.is_empty() {
-                // No more literals to process
-                initial_substs
-            } else {
-                // For each substitution from the first literal,
-                // apply it to the rest and continue
-                let mut all_substs = Vec::new();
-
-                for subst in initial_substs {
-                    // Apply current substitution to remaining literals
-                    let applied_rest: Vec<Literal> = rest
-                        .iter()
-                        .map(|lit| apply_subst_to_literal(&subst, lit))
-                        .collect();
-
-                    // Recursively satisfy the rest
-                    let rest_substs = satisfy_body(&applied_rest, db);
-
-                    // Combine substitutions
-                    for rest_subst in rest_substs {
-                        let combined = combine_substs(&subst, &rest_subst);
-                        all_substs.push(combined);
+            // Check if this is a built-in predicate
+            if let Some(builtin) = builtins::parse_builtin(atom) {
+                // This is a built-in - process the rest first, then filter
+                if rest.is_empty() {
+                    // No more literals - evaluate built-in with empty substitution
+                    let empty_subst = Substitution::new();
+                    match builtins::eval_builtin(&builtin, &empty_subst) {
+                        Some(true) => vec![empty_subst],
+                        _ => vec![],
                     }
-                }
+                } else {
+                    // Process rest first, then check built-in for each substitution
+                    let rest_substs = satisfy_body(rest, db);
+                    let mut result = Vec::new();
 
-                all_substs
+                    for subst in rest_substs {
+                        // Apply substitution to the built-in and evaluate
+                        let applied_builtin = apply_subst_to_builtin(&subst, &builtin);
+                        match builtins::eval_builtin(&applied_builtin, &subst) {
+                            Some(true) => result.push(subst),
+                            _ => {},  // Built-in failed, skip this substitution
+                        }
+                    }
+
+                    result
+                }
+            } else {
+                // Regular atom - query the database for matches
+                let initial_substs = db.query(atom);
+
+                if rest.is_empty() {
+                    // No more literals to process
+                    initial_substs
+                } else {
+                    // For each substitution from the first literal,
+                    // apply it to the rest and continue
+                    let mut all_substs = Vec::new();
+
+                    for subst in initial_substs {
+                        // Apply current substitution to remaining literals
+                        let applied_rest: Vec<Literal> = rest
+                            .iter()
+                            .map(|lit| apply_subst_to_literal(&subst, lit))
+                            .collect();
+
+                        // Recursively satisfy the rest
+                        let rest_substs = satisfy_body(&applied_rest, db);
+
+                        // Combine substitutions
+                        for rest_subst in rest_substs {
+                            let combined = combine_substs(&subst, &rest_subst);
+                            all_substs.push(combined);
+                        }
+                    }
+
+                    all_substs
+                }
             }
         }
         Literal::Negative(atom) => {
@@ -125,6 +154,21 @@ fn combine_substs(s1: &Substitution, s2: &Substitution) -> Substitution {
     }
 
     combined
+}
+
+/// Apply substitution to a built-in predicate
+fn apply_subst_to_builtin(subst: &Substitution, builtin: &builtins::BuiltIn) -> builtins::BuiltIn {
+    match builtin {
+        builtins::BuiltIn::Comparison(op, left, right) => {
+            builtins::BuiltIn::Comparison(
+                op.clone(),
+                subst.apply(left),
+                subst.apply(right),
+            )
+        }
+        builtins::BuiltIn::True => builtins::BuiltIn::True,
+        builtins::BuiltIn::Fail => builtins::BuiltIn::Fail,
+    }
 }
 
 /// Ground a rule using semi-naive evaluation
@@ -1045,5 +1089,62 @@ mod tests {
         let result = ground_choice_rule(&choice, &db, &const_env);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], make_atom("selected", vec![atom_const("a")]));
+    }
+
+    #[test]
+    fn test_satisfy_body_with_builtin_comparison() {
+        // Test: number(X), X > 5 with number(7) in the database
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("number", vec![Term::Constant(Value::Integer(7))]));
+        db.insert(make_atom("number", vec![Term::Constant(Value::Integer(3))]));
+
+        let body = vec![
+            Literal::Positive(make_atom("number", vec![var("X")])),
+            Literal::Positive(Atom {
+                predicate: Intern::new(">".to_string()),
+                terms: vec![var("X"), Term::Constant(Value::Integer(5))],
+            }),
+        ];
+
+        let result = satisfy_body(&body, &db);
+
+        // Should have exactly one substitution: {X -> 7}
+        assert_eq!(result.len(), 1, "Expected 1 substitution, got {}: {:#?}", result.len(), result);
+
+        let x_var = Intern::new("X".to_string());
+        let bound_value = result[0].get(&x_var).expect("X should be bound");
+        match bound_value {
+            Term::Constant(Value::Integer(7)) => {},
+            _ => panic!("Expected X to be bound to 7, got {:?}", bound_value),
+        }
+    }
+
+    #[test]
+    fn test_ground_rule_with_builtin_comparison() {
+        // Test: large(X) :- number(X), X > 5
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("number", vec![Term::Constant(Value::Integer(7))]));
+        db.insert(make_atom("number", vec![Term::Constant(Value::Integer(3))]));
+
+        let rule = Rule {
+            head: make_atom("large", vec![var("X")]),
+            body: vec![
+                Literal::Positive(make_atom("number", vec![var("X")])),
+                Literal::Positive(Atom {
+                    predicate: Intern::new(">".to_string()),
+                    terms: vec![var("X"), Term::Constant(Value::Integer(5))],
+                }),
+            ],
+        };
+
+        let result = ground_rule(&rule, &db);
+
+        // Should derive large(7)
+        assert_eq!(result.len(), 1, "Expected 1 derived fact, got {}: {:#?}", result.len(), result);
+
+        match &result[0].terms[0] {
+            Term::Constant(Value::Integer(7)) => {},
+            other => panic!("Expected large(7), got large({:?})", other),
+        }
     }
 }
