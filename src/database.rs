@@ -98,6 +98,7 @@ fn is_ground_term(term: &Term) -> bool {
     match term {
         Term::Variable(_) => false,
         Term::Constant(_) => true,
+        Term::Range(_, _) => true,  // Ranges are ground (no variables)
         Term::Compound(_, args) => args.iter().all(is_ground_term),
     }
 }

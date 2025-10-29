@@ -106,6 +106,9 @@ fn collect_vars_from_term(term: &Term, vars: &mut HashSet<Symbol>) {
         Term::Constant(_) => {
             // Constants don't have variables
         }
+        Term::Range(_, _) => {
+            // Ranges don't have variables (yet - could support constant names later)
+        }
         Term::Compound(_functor, args) => {
             for arg in args {
                 collect_vars_from_term(arg, vars);

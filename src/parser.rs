@@ -73,6 +73,24 @@ fn term() -> impl Parser<char, Term, Error = ParseError> + Clone {
         let variable = uppercase_ident()
             .map(|s| Term::Variable(Intern::new(s)));
 
+        // Range: term..term (must parse before number to avoid conflict)
+        // We allow integers or lowercase identifiers (constants) in ranges
+        let range_bound = choice((
+            text::int(10)
+                .try_map(|s: String, span: std::ops::Range<usize>| {
+                    s.parse::<i64>()
+                        .map(|n| Term::Constant(Value::Integer(n)))
+                        .map_err(|_| ParseError::custom(span, "invalid integer"))
+                }),
+            lowercase_ident()
+                .map(|s| Term::Constant(Value::Atom(Intern::new(s)))),
+        ));
+
+        let range = range_bound.clone()
+            .then_ignore(just(".."))
+            .then(range_bound)
+            .map(|(start, end)| Term::Range(Box::new(start), Box::new(end)));
+
         // Numbers (int or float, positive or negative)
         let number_const = number()
             .map(|v| Term::Constant(v));
@@ -104,6 +122,7 @@ fn term() -> impl Parser<char, Term, Error = ParseError> + Clone {
 
         choice((
             variable,
+            range,          // Parse range before number to avoid conflict with dots
             number_const,
             string_const,
             bool_atom_or_compound,
@@ -228,10 +247,110 @@ fn prob_fact() -> impl Parser<char, Statement, Error = ParseError> + Clone {
         .labelled("probabilistic fact")
 }
 
+/// Parse a constant declaration: #const name = value.
+fn const_decl() -> impl Parser<char, Statement, Error = ParseError> + Clone {
+    just('#')
+        .then_ignore(text::keyword("const").padded())
+        .ignore_then(lowercase_ident())
+        .then_ignore(just('=').padded())
+        .then(
+            just('-')
+                .or_not()
+                .then(text::int(10))
+                .try_map(|(sign, num_str), span| {
+                    let num: i64 = num_str.parse().map_err(|_| {
+                        ParseError::custom(span, "invalid integer")
+                    })?;
+                    Ok(if sign.is_some() { -num } else { num })
+                })
+        )
+        .then_ignore(just('.').padded())
+        .map(|(name, value)| {
+            Statement::ConstDecl(ConstDecl {
+                name: Intern::new(name),
+                value,
+            })
+        })
+        .labelled("constant declaration")
+}
+
+/// Parse a choice rule: { atom1; atom2 } or 1 { atom1; atom2 } 2 :- body.
+fn choice_rule() -> impl Parser<char, Statement, Error = ParseError> + Clone {
+    // Optional lower bound
+    let lower_bound = text::int(10)
+        .try_map(|s: String, span: std::ops::Range<usize>| {
+            s.parse::<i64>()
+                .map_err(|_| ParseError::custom(span, "invalid integer"))
+        })
+        .padded()
+        .or_not();
+
+    // Choice element: atom or atom : condition1, condition2
+    let choice_element = atom()
+        .then(
+            just(':')
+                .padded()
+                .ignore_then(
+                    literal()
+                        .separated_by(just(',').padded())
+                        .at_least(1)
+                )
+                .or_not()
+        )
+        .map(|(atom, condition)| {
+            ChoiceElement {
+                atom,
+                condition: condition.unwrap_or_default(),
+            }
+        });
+
+    // Elements inside braces, separated by semicolons
+    let elements = choice_element
+        .separated_by(just(';').padded())
+        .at_least(1)
+        .delimited_by(just('{').padded(), just('}').padded());
+
+    // Optional upper bound
+    let upper_bound = text::int(10)
+        .try_map(|s: String, span: std::ops::Range<usize>| {
+            s.parse::<i64>()
+                .map_err(|_| ParseError::custom(span, "invalid integer"))
+        })
+        .padded()
+        .or_not();
+
+    // Optional body after :-
+    let body = just(":-")
+        .padded()
+        .ignore_then(
+            literal()
+                .separated_by(just(',').padded())
+                .at_least(1)
+        )
+        .or_not();
+
+    lower_bound
+        .then(elements)
+        .then(upper_bound)
+        .then(body)
+        .then_ignore(just('.').padded())
+        .map(|(((lower, elements), upper), body)| {
+            Statement::ChoiceRule(ChoiceRule {
+                lower_bound: lower,
+                upper_bound: upper,
+                elements,
+                body: body.unwrap_or_default(),
+            })
+        })
+        .labelled("choice rule")
+}
+
 /// Parse a statement
 fn statement() -> impl Parser<char, Statement, Error = ParseError> + Clone {
     choice((
+        const_decl(),   // Try #const first (distinctive prefix)
         prob_fact(),
+        choice_rule(),  // Try choice rules (distinctive { prefix)
         constraint(),
         rule(),
         fact(),
@@ -259,6 +378,23 @@ pub fn parse_program(input: &str) -> Result<Program, Vec<ParseError>> {
 mod tests {
     use super::*;
 
+    // Helper functions for tests
+    fn int_term(n: i64) -> Term {
+        Term::Constant(Value::Integer(n))
+    }
+
+    fn atom_term(name: &str) -> Term {
+        Term::Constant(Value::Atom(Intern::new(name.to_string())))
+    }
+
+    fn range(start: i64, end: i64) -> Term {
+        Term::Range(Box::new(int_term(start)), Box::new(int_term(end)))
+    }
+
+    fn range_const(start: i64, end_name: &str) -> Term {
+        Term::Range(Box::new(int_term(start)), Box::new(atom_term(end_name)))
+    }
+
     // Term parsing tests - Datatypes
 
     // Integers
@@ -281,6 +417,53 @@ mod tests {
         let result = term().parse("0");
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), Term::Constant(Value::Integer(0)));
+    }
+
+    // Ranges
+    #[test]
+    fn test_parse_range_simple() {
+        let result = term().parse("1..10");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), range(1, 10));
+    }
+
+    #[test]
+    fn test_parse_range_zero_start() {
+        let result = term().parse("0..5");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), range(0, 5));
+    }
+
+    #[test]
+    fn test_parse_range_large() {
+        let result = term().parse("1..100");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), range(1, 100));
+    }
+
+    #[test]
+    fn test_parse_range_same_values() {
+        let result = term().parse("5..5");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), range(5, 5));
+    }
+
+    #[test]
+    fn test_parse_range_with_constant() {
+        let result = term().parse("1..width");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), range_const(1, "width"));
+    }
+
+    #[test]
+    fn test_parse_range_both_constants() {
+        let result = term().parse("min..max");
+        assert!(result.is_ok());
+        let expected = Term::Range(
+            Box::new(atom_term("min")),
+            Box::new(atom_term("max"))
+        );
+        assert_eq!(result.unwrap(), expected);
     }
 
     // Floats
@@ -514,6 +697,159 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_parse_const_decl() {
+        let result = parse_program("#const width = 10.");
+        assert!(result.is_ok());
+        let program = result.unwrap();
+        assert_eq!(program.statements.len(), 1);
+        match &program.statements[0] {
+            Statement::ConstDecl(const_decl) => {
+                assert_eq!(const_decl.name, Intern::new("width".to_string()));
+                assert_eq!(const_decl.value, 10);
+            }
+            _ => panic!("Expected constant declaration"),
+        }
+    }
+
+    #[test]
+    fn test_parse_const_decl_negative() {
+        let result = parse_program("#const min_temp = -5.");
+        assert!(result.is_ok());
+        let program = result.unwrap();
+        match &program.statements[0] {
+            Statement::ConstDecl(const_decl) => {
+                assert_eq!(const_decl.name, Intern::new("min_temp".to_string()));
+                assert_eq!(const_decl.value, -5);
+            }
+            _ => panic!("Expected constant declaration"),
+        }
+    }
+
+    #[test]
+    fn test_parse_multiple_const_decls() {
+        let input = r#"
+            #const width = 10.
+            #const height = 20.
+            #const max_enemies = 5.
+        "#;
+        let result = parse_program(input);
+        assert!(result.is_ok());
+        let program = result.unwrap();
+        assert_eq!(program.statements.len(), 3);
+
+        match &program.statements[0] {
+            Statement::ConstDecl(c) => {
+                assert_eq!(c.name, Intern::new("width".to_string()));
+                assert_eq!(c.value, 10);
+            }
+            _ => panic!("Expected const"),
+        }
+
+        match &program.statements[1] {
+            Statement::ConstDecl(c) => {
+                assert_eq!(c.name, Intern::new("height".to_string()));
+                assert_eq!(c.value, 20);
+            }
+            _ => panic!("Expected const"),
+        }
+    }
+
+    // Choice rules
+    #[test]
+    fn test_parse_simple_choice() {
+        let input = "{ solid(1, 2); solid(2, 3) }.";
+        let result = parse_program(input);
+        assert!(result.is_ok());
+        let program = result.unwrap();
+        assert_eq!(program.statements.len(), 1);
+
+        match &program.statements[0] {
+            Statement::ChoiceRule(choice) => {
+                assert_eq!(choice.lower_bound, None);
+                assert_eq!(choice.upper_bound, None);
+                assert_eq!(choice.elements.len(), 2);
+                assert_eq!(choice.body.len(), 0);
+                assert_eq!(choice.elements[0].atom.predicate, Intern::new("solid".to_string()));
+                assert_eq!(choice.elements[0].condition.len(), 0);
+            }
+            _ => panic!("Expected choice rule"),
+        }
+    }
+
+    #[test]
+    fn test_parse_choice_with_bounds() {
+        let input = "1 { item(a); item(b); item(c) } 2.";
+        let result = parse_program(input);
+        assert!(result.is_ok());
+        let program = result.unwrap();
+
+        match &program.statements[0] {
+            Statement::ChoiceRule(choice) => {
+                assert_eq!(choice.lower_bound, Some(1));
+                assert_eq!(choice.upper_bound, Some(2));
+                assert_eq!(choice.elements.len(), 3);
+            }
+            _ => panic!("Expected choice rule"),
+        }
+    }
+
+    #[test]
+    fn test_parse_choice_with_lower_bound() {
+        let input = "2 { selected(X) }.";
+        let result = parse_program(input);
+        assert!(result.is_ok());
+
+        match &result.unwrap().statements[0] {
+            Statement::ChoiceRule(choice) => {
+                assert_eq!(choice.lower_bound, Some(2));
+                assert_eq!(choice.upper_bound, None);
+            }
+            _ => panic!("Expected choice rule"),
+        }
+    }
+
+    #[test]
+    fn test_parse_choice_with_condition() {
+        let input = "{ selected(X) : item(X) }.";
+        let result = parse_program(input);
+        assert!(result.is_ok());
+
+        match &result.unwrap().statements[0] {
+            Statement::ChoiceRule(choice) => {
+                assert_eq!(choice.elements.len(), 1);
+                assert_eq!(choice.elements[0].condition.len(), 1);
+                match &choice.elements[0].condition[0] {
+                    Literal::Positive(atom) => {
+                        assert_eq!(atom.predicate, Intern::new("item".to_string()));
+                    }
+                    _ => panic!("Expected positive literal"),
+                }
+            }
+            _ => panic!("Expected choice rule"),
+        }
+    }
+
+    #[test]
+    fn test_parse_choice_with_body() {
+        let input = "{ selected(X) : item(X) } :- room(R).";
+        let result = parse_program(input);
+        assert!(result.is_ok());
+
+        match &result.unwrap().statements[0] {
+            Statement::ChoiceRule(choice) => {
+                assert_eq!(choice.body.len(), 1);
+                match &choice.body[0] {
+                    Literal::Positive(atom) => {
+                        assert_eq!(atom.predicate, Intern::new("room".to_string()));
+                    }
+                    _ => panic!("Expected positive literal"),
+                }
+            }
+            _ => panic!("Expected choice rule"),
+        }
+    }
+
     // Full program parsing tests
     #[test]
     fn test_parse_empty_program() {
@@ -646,4 +982,112 @@ mod tests {
         let program = result.unwrap();
         assert_eq!(program.statements.len(), 10);
     }
+
+    // Range parsing tests
+    #[test]
+    fn test_parse_fact_with_range() {
+        let result = parse_program("dim(1..10).");
+        assert!(result.is_ok());
+        let program = result.unwrap();
+        assert_eq!(program.statements.len(), 1);
+
+        match &program.statements[0] {
+            Statement::Fact(fact) => {
+                assert_eq!(fact.atom.predicate, Intern::new("dim".to_string()));
+                assert_eq!(fact.atom.terms.len(), 1);
+                assert_eq!(fact.atom.terms[0], range(1, 10));
+            }
+            _ => panic!("Expected fact"),
+        }
+    }
+
+    #[test]
+    fn test_parse_fact_with_multiple_ranges() {
+        let result = parse_program("cell(1..5, 1..10).");
+        assert!(result.is_ok());
+        let program = result.unwrap();
+
+        match &program.statements[0] {
+            Statement::Fact(fact) => {
+                assert_eq!(fact.atom.predicate, Intern::new("cell".to_string()));
+                assert_eq!(fact.atom.terms.len(), 2);
+                assert_eq!(fact.atom.terms[0], range(1, 5));
+                assert_eq!(fact.atom.terms[1], range(1, 10));
+            }
+            _ => panic!("Expected fact"),
+        }
+    }
+
+    #[test]
+    fn test_parse_fact_with_mixed_terms_and_range() {
+        let result = parse_program("edge(a, 1..10, b).");
+        assert!(result.is_ok());
+        let program = result.unwrap();
+
+        match &program.statements[0] {
+            Statement::Fact(fact) => {
+                assert_eq!(fact.atom.terms.len(), 3);
+                assert_eq!(fact.atom.terms[0], Term::Constant(Value::Atom(Intern::new("a".to_string()))));
+                assert_eq!(fact.atom.terms[1], range(1, 10));
+                assert_eq!(fact.atom.terms[2], Term::Constant(Value::Atom(Intern::new("b".to_string()))));
+            }
+            _ => panic!("Expected fact"),
+        }
+    }
+
+    #[test]
+    fn test_parse_range_in_compound_term() {
+        let result = parse_program("data(item(1..5)).");
+        assert!(result.is_ok());
+        let program = result.unwrap();
+
+        match &program.statements[0] {
+            Statement::Fact(fact) => {
+                assert_eq!(fact.atom.terms.len(), 1);
+                match &fact.atom.terms[0] {
+                    Term::Compound(functor, args) => {
+                        assert_eq!(*functor, Intern::new("item".to_string()));
+                        assert_eq!(args.len(), 1);
+                        assert_eq!(args[0], range(1, 5));
+                    }
+                    _ => panic!("Expected compound term"),
+                }
+            }
+            _ => panic!("Expected fact"),
+        }
+    }
+
+    #[test]
+    fn test_parse_program_with_consts_and_ranges() {
+        let input = r#"
+            #const width = 10.
+            #const height = 5.
+
+            dim(1..10).
+            cell(1..10, 1..5).
+        "#;
+        let result = parse_program(input);
+        assert!(result.is_ok());
+        let program = result.unwrap();
+        assert_eq!(program.statements.len(), 4);
+
+        // First two should be const decls
+        match &program.statements[0] {
+            Statement::ConstDecl(c) => {
+                assert_eq!(c.name, Intern::new("width".to_string()));
+            }
+            _ => panic!("Expected const"),
+        }
+
+        // Third should be dim(1..width) - note: width won't be substituted yet
+        match &program.statements[2] {
+            Statement::Fact(fact) => {
+                assert_eq!(fact.atom.predicate, Intern::new("dim".to_string()));
+                // Range still contains literal values until expansion
+                assert_eq!(fact.atom.terms[0], range(1, 10));
+            }
+            _ => panic!("Expected fact"),
+        }
+    }
 }
+

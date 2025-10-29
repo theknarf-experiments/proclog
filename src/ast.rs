@@ -15,6 +15,8 @@ pub enum Statement {
     Rule(Rule),
     Constraint(Constraint),
     ProbFact(ProbFact),
+    ConstDecl(ConstDecl),
+    ChoiceRule(ChoiceRule),
 }
 
 /// A fact is simply an atom: `parent(john, mary).`
@@ -43,6 +45,29 @@ pub struct ProbFact {
     pub atom: Atom,
 }
 
+/// A constant declaration: `#const width = 10.`
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConstDecl {
+    pub name: Symbol,
+    pub value: i64,
+}
+
+/// A choice rule: `{ atom1; atom2 }` or `1 { atom1; atom2 } 3`
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChoiceRule {
+    pub lower_bound: Option<i64>,  // None means 0
+    pub upper_bound: Option<i64>,  // None means infinity
+    pub elements: Vec<ChoiceElement>,
+    pub body: Vec<Literal>,  // Optional body like regular rules
+}
+
+/// An element in a choice rule
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChoiceElement {
+    pub atom: Atom,
+    pub condition: Vec<Literal>,  // Optional condition after ':'
+}
+
 /// A literal is either a positive or negative atom
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Literal {
@@ -57,7 +82,7 @@ pub struct Atom {
     pub terms: Vec<Term>,
 }
 
-/// A term can be a variable, constant, or compound term
+/// A term can be a variable, constant, compound term, or range
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Term {
     /// Variable: uppercase or starts with underscore (X, Y, _tmp)
@@ -66,6 +91,8 @@ pub enum Term {
     Constant(Value),
     /// Compound term: functor with arguments (f(a, b))
     Compound(Symbol, Vec<Term>),
+    /// Range: generates sequence of integers (1..10, 1..width)
+    Range(Box<Term>, Box<Term>),
 }
 
 /// Constant values

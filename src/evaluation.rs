@@ -1,4 +1,4 @@
-use crate::ast::{Rule, Atom, Constraint, Literal};
+use crate::ast::{Rule, Atom, Constraint};
 use crate::database::FactDatabase;
 use crate::grounding::{ground_rule, ground_rule_semi_naive, satisfy_body};
 use crate::stratification::{stratify, StratificationError};

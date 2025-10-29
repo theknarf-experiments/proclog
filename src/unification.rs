@@ -57,6 +57,11 @@ impl Substitution {
                 }
             }
             Term::Constant(_) => term.clone(),
+            Term::Range(_, _) => {
+                // Ranges should be expanded before unification
+                // For now, just return the range as-is
+                term.clone()
+            }
             Term::Compound(functor, args) => {
                 let new_args = args.iter().map(|arg| self.apply(arg)).collect();
                 Term::Compound(functor.clone(), new_args)
@@ -120,6 +125,7 @@ fn occurs_check(var: &Symbol, term: &Term) -> bool {
     match term {
         Term::Variable(v) => v == var,
         Term::Constant(_) => false,
+        Term::Range(_, _) => false,  // Ranges don't contain variables
         Term::Compound(_, args) => args.iter().any(|arg| occurs_check(var, arg)),
     }
 }

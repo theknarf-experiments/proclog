@@ -1,6 +1,7 @@
-use crate::ast::{Rule, Atom, Literal, Term, Value};
+use crate::ast::{Rule, Atom, Literal, Term, Value, ChoiceRule, ChoiceElement};
 use crate::database::FactDatabase;
 use crate::unification::Substitution;
+use crate::constants::ConstantEnv;
 use internment::Intern;
 
 /// Ground a rule: generate all ground instances by substituting variables
@@ -242,6 +243,145 @@ fn satisfy_body_mixed_recursive(
     }
 }
 
+/// Expand a range term into concrete integer values
+/// For example, Range(1, 3) becomes [1, 2, 3]
+pub fn expand_range(start: &Term, end: &Term, const_env: &ConstantEnv) -> Option<Vec<i64>> {
+    // Apply constant substitution first
+    let start_term = const_env.substitute_term(start);
+    let end_term = const_env.substitute_term(end);
+
+    // Extract integer values
+    let start_val = match &start_term {
+        Term::Constant(Value::Integer(n)) => *n,
+        _ => return None, // Can't expand non-integer ranges
+    };
+
+    let end_val = match &end_term {
+        Term::Constant(Value::Integer(n)) => *n,
+        _ => return None,
+    };
+
+    // Generate range (inclusive)
+    let range: Vec<i64> = (start_val..=end_val).collect();
+    Some(range)
+}
+
+/// Expand an atom containing ranges into multiple ground atoms
+/// For example, cell(1..3, 5) becomes [cell(1,5), cell(2,5), cell(3,5)]
+pub fn expand_atom_ranges(atom: &Atom, const_env: &ConstantEnv) -> Vec<Atom> {
+    fn expand_terms_recursive(terms: &[Term], const_env: &ConstantEnv) -> Vec<Vec<Term>> {
+        if terms.is_empty() {
+            return vec![vec![]];
+        }
+
+        let first = &terms[0];
+        let rest = &terms[1..];
+
+        // Expand the first term
+        let first_expansions: Vec<Term> = match first {
+            Term::Range(start, end) => {
+                if let Some(values) = expand_range(start, end, const_env) {
+                    values.into_iter()
+                        .map(|n| Term::Constant(Value::Integer(n)))
+                        .collect()
+                } else {
+                    vec![first.clone()] // Can't expand, keep as-is
+                }
+            }
+            _ => vec![first.clone()],
+        };
+
+        // Recursively expand the rest
+        let rest_expansions = expand_terms_recursive(rest, const_env);
+
+        // Combine first expansions with rest expansions (cartesian product)
+        let mut result = Vec::new();
+        for first_term in &first_expansions {
+            for rest_terms in &rest_expansions {
+                let mut combined = vec![first_term.clone()];
+                combined.extend(rest_terms.clone());
+                result.push(combined);
+            }
+        }
+        result
+    }
+
+    let expanded_term_lists = expand_terms_recursive(&atom.terms, const_env);
+
+    expanded_term_lists.into_iter()
+        .map(|terms| Atom {
+            predicate: atom.predicate.clone(),
+            terms,
+        })
+        .collect()
+}
+
+/// Ground a choice element by finding all substitutions that satisfy its condition
+pub fn ground_choice_element(
+    element: &ChoiceElement,
+    db: &FactDatabase,
+    const_env: &ConstantEnv,
+) -> Vec<Atom> {
+    // First expand any ranges in the atom
+    let expanded_atoms = expand_atom_ranges(&element.atom, const_env);
+
+    let mut result = Vec::new();
+
+    for atom in expanded_atoms {
+        if element.condition.is_empty() {
+            // No condition - just add the atom
+            result.push(atom);
+        } else {
+            // Find substitutions that satisfy the condition
+            let substs = satisfy_body(&element.condition, db);
+
+            // Apply each substitution to the atom
+            for subst in substs {
+                let ground_atom = subst.apply_atom(&atom);
+                result.push(ground_atom);
+            }
+        }
+    }
+
+    result
+}
+
+/// Ground a choice rule by expanding all its elements
+pub fn ground_choice_rule(
+    choice: &ChoiceRule,
+    db: &FactDatabase,
+    const_env: &ConstantEnv,
+) -> Vec<Atom> {
+    let mut result = Vec::new();
+
+    // If there's a body, we need to ground it first
+    let body_substs = if choice.body.is_empty() {
+        vec![Substitution::new()]
+    } else {
+        satisfy_body(&choice.body, db)
+    };
+
+    // For each way to satisfy the body
+    for body_subst in body_substs {
+        // Ground each choice element
+        for element in &choice.elements {
+            // Apply body substitution to element
+            let element_with_body_subst = ChoiceElement {
+                atom: body_subst.apply_atom(&element.atom),
+                condition: element.condition.iter()
+                    .map(|lit| apply_subst_to_literal(&body_subst, lit))
+                    .collect(),
+            };
+
+            // Ground this element
+            let grounded = ground_choice_element(&element_with_body_subst, db, const_env);
+            result.extend(grounded);
+        }
+    }
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -249,6 +389,10 @@ mod tests {
     // Helper functions
     fn atom_const(name: &str) -> Term {
         Term::Constant(Value::Atom(Intern::new(name.to_string())))
+    }
+
+    fn int(n: i64) -> Term {
+        Term::Constant(Value::Integer(n))
     }
 
     fn var(name: &str) -> Term {
@@ -580,5 +724,326 @@ mod tests {
         let all_results = db.query(&all_grandparents);
 
         assert_eq!(all_results.len(), 2);
+    }
+
+    // Range expansion tests
+    #[test]
+    fn test_expand_range_simple() {
+        let const_env = ConstantEnv::new();
+        let start = Term::Constant(Value::Integer(1));
+        let end = Term::Constant(Value::Integer(3));
+
+        let result = expand_range(&start, &end, &const_env);
+        assert_eq!(result, Some(vec![1, 2, 3]));
+    }
+
+    #[test]
+    fn test_expand_range_with_constants() {
+        let mut const_env = ConstantEnv::new();
+        const_env.define(Intern::new("max".to_string()), 5);
+
+        let start = Term::Constant(Value::Integer(3));
+        let end = Term::Constant(Value::Atom(Intern::new("max".to_string())));
+
+        let result = expand_range(&start, &end, &const_env);
+        assert_eq!(result, Some(vec![3, 4, 5]));
+    }
+
+    #[test]
+    fn test_expand_atom_ranges_single_range() {
+        let const_env = ConstantEnv::new();
+        let atom = make_atom("cell", vec![
+            Term::Range(
+                Box::new(Term::Constant(Value::Integer(1))),
+                Box::new(Term::Constant(Value::Integer(3)))
+            ),
+            atom_const("a")
+        ]);
+
+        let result = expand_atom_ranges(&atom, &const_env);
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0], make_atom("cell", vec![int(1), atom_const("a")]));
+        assert_eq!(result[1], make_atom("cell", vec![int(2), atom_const("a")]));
+        assert_eq!(result[2], make_atom("cell", vec![int(3), atom_const("a")]));
+    }
+
+    #[test]
+    fn test_expand_atom_ranges_multiple_ranges() {
+        let const_env = ConstantEnv::new();
+        let atom = make_atom("cell", vec![
+            Term::Range(
+                Box::new(Term::Constant(Value::Integer(1))),
+                Box::new(Term::Constant(Value::Integer(2)))
+            ),
+            Term::Range(
+                Box::new(Term::Constant(Value::Integer(10))),
+                Box::new(Term::Constant(Value::Integer(11)))
+            )
+        ]);
+
+        let result = expand_atom_ranges(&atom, &const_env);
+        assert_eq!(result.len(), 4); // 2 * 2 = 4 combinations
+        assert_eq!(result[0], make_atom("cell", vec![int(1), int(10)]));
+        assert_eq!(result[1], make_atom("cell", vec![int(1), int(11)]));
+        assert_eq!(result[2], make_atom("cell", vec![int(2), int(10)]));
+        assert_eq!(result[3], make_atom("cell", vec![int(2), int(11)]));
+    }
+
+    #[test]
+    fn test_ground_choice_element_no_condition() {
+        let db = FactDatabase::new();
+        let const_env = ConstantEnv::new();
+
+        let element = ChoiceElement {
+            atom: make_atom("selected", vec![atom_const("a")]),
+            condition: vec![],
+        };
+
+        let result = ground_choice_element(&element, &db, &const_env);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], make_atom("selected", vec![atom_const("a")]));
+    }
+
+    #[test]
+    fn test_ground_choice_element_with_condition() {
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("item", vec![atom_const("a")]));
+        db.insert(make_atom("item", vec![atom_const("b")]));
+
+        let const_env = ConstantEnv::new();
+
+        let element = ChoiceElement {
+            atom: make_atom("selected", vec![var("X")]),
+            condition: vec![Literal::Positive(make_atom("item", vec![var("X")]))],
+        };
+
+        let result = ground_choice_element(&element, &db, &const_env);
+        assert_eq!(result.len(), 2);
+        assert!(result.contains(&make_atom("selected", vec![atom_const("a")])));
+        assert!(result.contains(&make_atom("selected", vec![atom_const("b")])));
+    }
+
+    #[test]
+    fn test_ground_choice_element_with_range() {
+        let db = FactDatabase::new();
+        let const_env = ConstantEnv::new();
+
+        let element = ChoiceElement {
+            atom: make_atom("cell", vec![
+                Term::Range(
+                    Box::new(Term::Constant(Value::Integer(1))),
+                    Box::new(Term::Constant(Value::Integer(2)))
+                ),
+                atom_const("solid")
+            ]),
+            condition: vec![],
+        };
+
+        let result = ground_choice_element(&element, &db, &const_env);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], make_atom("cell", vec![int(1), atom_const("solid")]));
+        assert_eq!(result[1], make_atom("cell", vec![int(2), atom_const("solid")]));
+    }
+
+    // Edge case tests for range expansion
+
+    #[test]
+    fn test_expand_range_backwards() {
+        // Backwards range should produce empty result
+        let const_env = ConstantEnv::new();
+        let start = Term::Constant(Value::Integer(5));
+        let end = Term::Constant(Value::Integer(1));
+
+        let result = expand_range(&start, &end, &const_env);
+        // Backwards range produces empty vector
+        assert_eq!(result, Some(vec![]));
+    }
+
+    #[test]
+    fn test_expand_range_single_element() {
+        let const_env = ConstantEnv::new();
+        let start = Term::Constant(Value::Integer(5));
+        let end = Term::Constant(Value::Integer(5));
+
+        let result = expand_range(&start, &end, &const_env);
+        assert_eq!(result, Some(vec![5]));
+    }
+
+    #[test]
+    fn test_expand_range_negative_values() {
+        let const_env = ConstantEnv::new();
+        let start = Term::Constant(Value::Integer(-3));
+        let end = Term::Constant(Value::Integer(-1));
+
+        let result = expand_range(&start, &end, &const_env);
+        assert_eq!(result, Some(vec![-3, -2, -1]));
+    }
+
+    #[test]
+    fn test_expand_range_crossing_zero() {
+        let const_env = ConstantEnv::new();
+        let start = Term::Constant(Value::Integer(-2));
+        let end = Term::Constant(Value::Integer(2));
+
+        let result = expand_range(&start, &end, &const_env);
+        assert_eq!(result, Some(vec![-2, -1, 0, 1, 2]));
+    }
+
+    #[test]
+    fn test_expand_range_with_undefined_constant() {
+        let const_env = ConstantEnv::new();
+        let start = Term::Constant(Value::Integer(1));
+        let end = Term::Constant(Value::Atom(Intern::new("undefined".to_string())));
+
+        let result = expand_range(&start, &end, &const_env);
+        // Undefined constant can't be expanded
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_expand_range_with_non_integer_constant() {
+        let const_env = ConstantEnv::new();
+        let start = Term::Constant(Value::Atom(Intern::new("not_a_number".to_string())));
+        let end = Term::Constant(Value::Integer(5));
+
+        let result = expand_range(&start, &end, &const_env);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_expand_atom_ranges_no_ranges() {
+        let const_env = ConstantEnv::new();
+        let atom = make_atom("cell", vec![atom_const("a"), atom_const("b")]);
+
+        let result = expand_atom_ranges(&atom, &const_env);
+        // No ranges, should return single atom unchanged
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], atom);
+    }
+
+    #[test]
+    fn test_expand_atom_ranges_empty_range() {
+        let const_env = ConstantEnv::new();
+        // 5..1 is a backwards range (empty)
+        let atom = make_atom("cell", vec![
+            Term::Range(
+                Box::new(Term::Constant(Value::Integer(5))),
+                Box::new(Term::Constant(Value::Integer(1)))
+            ),
+            atom_const("x")
+        ]);
+
+        let result = expand_atom_ranges(&atom, &const_env);
+        // Empty range produces no atoms
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_expand_atom_ranges_mixed_terms() {
+        let const_env = ConstantEnv::new();
+        let atom = make_atom("cell", vec![
+            atom_const("prefix"),
+            Term::Range(
+                Box::new(Term::Constant(Value::Integer(1))),
+                Box::new(Term::Constant(Value::Integer(2)))
+            ),
+            atom_const("suffix")
+        ]);
+
+        let result = expand_atom_ranges(&atom, &const_env);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], make_atom("cell", vec![atom_const("prefix"), int(1), atom_const("suffix")]));
+        assert_eq!(result[1], make_atom("cell", vec![atom_const("prefix"), int(2), atom_const("suffix")]));
+    }
+
+    #[test]
+    fn test_ground_choice_element_empty_condition_result() {
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("item", vec![atom_const("a")]));
+
+        let const_env = ConstantEnv::new();
+
+        // Condition that won't match anything
+        let element = ChoiceElement {
+            atom: make_atom("selected", vec![var("X")]),
+            condition: vec![Literal::Positive(make_atom("nonexistent", vec![var("X")]))],
+        };
+
+        let result = ground_choice_element(&element, &db, &const_env);
+        // No items match the condition
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_ground_choice_element_multiple_conditions() {
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("item", vec![atom_const("a")]));
+        db.insert(make_atom("item", vec![atom_const("b")]));
+        db.insert(make_atom("valid", vec![atom_const("a")]));
+        db.insert(make_atom("safe", vec![atom_const("a")]));
+
+        let const_env = ConstantEnv::new();
+
+        // Multiple conditions: both must be satisfied
+        let element = ChoiceElement {
+            atom: make_atom("selected", vec![var("X")]),
+            condition: vec![
+                Literal::Positive(make_atom("item", vec![var("X")])),
+                Literal::Positive(make_atom("valid", vec![var("X")])),
+                Literal::Positive(make_atom("safe", vec![var("X")])),
+            ],
+        };
+
+        let result = ground_choice_element(&element, &db, &const_env);
+        // Only 'a' satisfies all three conditions
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], make_atom("selected", vec![atom_const("a")]));
+    }
+
+    #[test]
+    fn test_ground_choice_rule_with_body_variables() {
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("room", vec![atom_const("r1")]));
+        db.insert(make_atom("item", vec![atom_const("sword")]));
+        db.insert(make_atom("item", vec![atom_const("shield")]));
+
+        let const_env = ConstantEnv::new();
+
+        // Choice rule with body
+        let choice = ChoiceRule {
+            lower_bound: None,
+            upper_bound: None,
+            elements: vec![ChoiceElement {
+                atom: make_atom("place", vec![var("I"), var("R")]),
+                condition: vec![Literal::Positive(make_atom("item", vec![var("I")]))],
+            }],
+            body: vec![Literal::Positive(make_atom("room", vec![var("R")]))],
+        };
+
+        let result = ground_choice_rule(&choice, &db, &const_env);
+        // 1 room * 2 items = 2 possible placements
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_ground_choice_rule_empty_body() {
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("item", vec![atom_const("a")]));
+
+        let const_env = ConstantEnv::new();
+
+        let choice = ChoiceRule {
+            lower_bound: Some(1),
+            upper_bound: Some(1),
+            elements: vec![ChoiceElement {
+                atom: make_atom("selected", vec![var("X")]),
+                condition: vec![Literal::Positive(make_atom("item", vec![var("X")]))],
+            }],
+            body: vec![],
+        };
+
+        let result = ground_choice_rule(&choice, &db, &const_env);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], make_atom("selected", vec![atom_const("a")]));
     }
 }
