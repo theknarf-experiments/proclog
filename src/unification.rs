@@ -1,6 +1,6 @@
-use std::collections::HashMap;
+use crate::ast::{Atom, Symbol, Term, Value};
 use internment::Intern;
-use crate::ast::{Term, Value, Atom, Symbol};
+use std::collections::HashMap;
 
 /// A substitution maps variables to terms
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -125,7 +125,7 @@ fn occurs_check(var: &Symbol, term: &Term) -> bool {
     match term {
         Term::Variable(v) => v == var,
         Term::Constant(_) => false,
-        Term::Range(_, _) => false,  // Ranges don't contain variables
+        Term::Range(_, _) => false, // Ranges don't contain variables
         Term::Compound(_, args) => args.iter().any(|arg| occurs_check(var, arg)),
     }
 }
@@ -345,7 +345,11 @@ mod tests {
     fn test_occurs_check_simple() {
         let mut subst = Substitution::new();
         // X = f(X) should fail (infinite structure)
-        assert!(!unify(&var("X"), &compound("f", vec![var("X")]), &mut subst));
+        assert!(!unify(
+            &var("X"),
+            &compound("f", vec![var("X")]),
+            &mut subst
+        ));
     }
 
     #[test]

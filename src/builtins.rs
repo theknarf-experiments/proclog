@@ -1,28 +1,28 @@
 // Built-in predicates and arithmetic evaluation
 
-use crate::ast::{Term, Value, Atom};
+use crate::ast::{Atom, Term, Value};
 use crate::unification::Substitution;
 use internment::Intern;
 
 /// Arithmetic operators
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ArithOp {
-    Add,      // +
-    Sub,      // -
-    Mul,      // *
-    Div,      // /
-    Mod,      // mod
+    Add, // +
+    Sub, // -
+    Mul, // *
+    Div, // /
+    Mod, // mod
 }
 
 /// Comparison operators
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum CompOp {
-    Eq,       // =
-    Neq,      // !=
-    Lt,       // <
-    Gt,       // >
-    Lte,      // <=
-    Gte,      // >=
+    Eq,  // =
+    Neq, // !=
+    Lt,  // <
+    Gt,  // >
+    Lte, // <=
+    Gte, // >=
 }
 
 /// Built-in predicates that can be evaluated directly
@@ -47,7 +47,7 @@ pub fn eval_arith(term: &Term, subst: &Substitution) -> Option<i64> {
             if let Some(bound_term) = subst.get(var) {
                 eval_arith(bound_term, subst)
             } else {
-                None  // Unbound variable
+                None // Unbound variable
             }
         }
 
@@ -73,7 +73,7 @@ pub fn eval_arith(term: &Term, subst: &Substitution) -> Option<i64> {
                     let left = eval_arith(&args[0], subst)?;
                     let right = eval_arith(&args[1], subst)?;
                     if right == 0 {
-                        None  // Division by zero
+                        None // Division by zero
                     } else {
                         Some(left / right)
                     }
@@ -82,23 +82,28 @@ pub fn eval_arith(term: &Term, subst: &Substitution) -> Option<i64> {
                     let left = eval_arith(&args[0], subst)?;
                     let right = eval_arith(&args[1], subst)?;
                     if right == 0 {
-                        None  // Modulo by zero
+                        None // Modulo by zero
                     } else {
                         Some(left % right)
                     }
                 }
-                _ => None  // Not an arithmetic operator
+                _ => None, // Not an arithmetic operator
             }
         }
 
-        _ => None  // Cannot evaluate this type of term arithmetically
+        _ => None, // Cannot evaluate this type of term arithmetically
     }
 }
 
 /// Evaluate a comparison built-in predicate
 /// Returns true if the comparison holds, false otherwise
 /// Returns None if terms cannot be evaluated
-pub fn eval_comparison(op: &CompOp, left: &Term, right: &Term, subst: &Substitution) -> Option<bool> {
+pub fn eval_comparison(
+    op: &CompOp,
+    left: &Term,
+    right: &Term,
+    subst: &Substitution,
+) -> Option<bool> {
     // Try to evaluate both sides as arithmetic expressions
     let left_val = eval_arith(left, subst);
     let right_val = eval_arith(right, subst);
@@ -115,7 +120,7 @@ pub fn eval_comparison(op: &CompOp, left: &Term, right: &Term, subst: &Substitut
             };
             Some(result)
         }
-        _ => None  // Cannot evaluate comparison
+        _ => None, // Cannot evaluate comparison
     }
 }
 
@@ -135,31 +140,39 @@ pub fn parse_builtin(atom: &Atom) -> Option<BuiltIn> {
     let pred = atom.predicate.as_ref().as_str();
 
     match pred {
-        "=" if atom.terms.len() == 2 => {
-            Some(BuiltIn::Comparison(CompOp::Eq, atom.terms[0].clone(), atom.terms[1].clone()))
-        }
-        "!=" | "\\=" if atom.terms.len() == 2 => {
-            Some(BuiltIn::Comparison(CompOp::Neq, atom.terms[0].clone(), atom.terms[1].clone()))
-        }
-        "<" if atom.terms.len() == 2 => {
-            Some(BuiltIn::Comparison(CompOp::Lt, atom.terms[0].clone(), atom.terms[1].clone()))
-        }
-        ">" if atom.terms.len() == 2 => {
-            Some(BuiltIn::Comparison(CompOp::Gt, atom.terms[0].clone(), atom.terms[1].clone()))
-        }
-        "<=" | "=<" if atom.terms.len() == 2 => {
-            Some(BuiltIn::Comparison(CompOp::Lte, atom.terms[0].clone(), atom.terms[1].clone()))
-        }
-        ">=" if atom.terms.len() == 2 => {
-            Some(BuiltIn::Comparison(CompOp::Gte, atom.terms[0].clone(), atom.terms[1].clone()))
-        }
-        "true" if atom.terms.is_empty() => {
-            Some(BuiltIn::True)
-        }
-        "fail" | "false" if atom.terms.is_empty() => {
-            Some(BuiltIn::Fail)
-        }
-        _ => None  // Not a built-in
+        "=" if atom.terms.len() == 2 => Some(BuiltIn::Comparison(
+            CompOp::Eq,
+            atom.terms[0].clone(),
+            atom.terms[1].clone(),
+        )),
+        "!=" | "\\=" if atom.terms.len() == 2 => Some(BuiltIn::Comparison(
+            CompOp::Neq,
+            atom.terms[0].clone(),
+            atom.terms[1].clone(),
+        )),
+        "<" if atom.terms.len() == 2 => Some(BuiltIn::Comparison(
+            CompOp::Lt,
+            atom.terms[0].clone(),
+            atom.terms[1].clone(),
+        )),
+        ">" if atom.terms.len() == 2 => Some(BuiltIn::Comparison(
+            CompOp::Gt,
+            atom.terms[0].clone(),
+            atom.terms[1].clone(),
+        )),
+        "<=" | "=<" if atom.terms.len() == 2 => Some(BuiltIn::Comparison(
+            CompOp::Lte,
+            atom.terms[0].clone(),
+            atom.terms[1].clone(),
+        )),
+        ">=" if atom.terms.len() == 2 => Some(BuiltIn::Comparison(
+            CompOp::Gte,
+            atom.terms[0].clone(),
+            atom.terms[1].clone(),
+        )),
+        "true" if atom.terms.is_empty() => Some(BuiltIn::True),
+        "fail" | "false" if atom.terms.is_empty() => Some(BuiltIn::Fail),
+        _ => None, // Not a built-in
     }
 }
 
@@ -269,17 +282,32 @@ mod tests {
     fn test_eval_comparison_eq() {
         let subst = Substitution::new();
 
-        assert_eq!(eval_comparison(&CompOp::Eq, &int(5), &int(5), &subst), Some(true));
-        assert_eq!(eval_comparison(&CompOp::Eq, &int(5), &int(3), &subst), Some(false));
+        assert_eq!(
+            eval_comparison(&CompOp::Eq, &int(5), &int(5), &subst),
+            Some(true)
+        );
+        assert_eq!(
+            eval_comparison(&CompOp::Eq, &int(5), &int(3), &subst),
+            Some(false)
+        );
     }
 
     #[test]
     fn test_eval_comparison_lt() {
         let subst = Substitution::new();
 
-        assert_eq!(eval_comparison(&CompOp::Lt, &int(3), &int(5), &subst), Some(true));
-        assert_eq!(eval_comparison(&CompOp::Lt, &int(5), &int(3), &subst), Some(false));
-        assert_eq!(eval_comparison(&CompOp::Lt, &int(5), &int(5), &subst), Some(false));
+        assert_eq!(
+            eval_comparison(&CompOp::Lt, &int(3), &int(5), &subst),
+            Some(true)
+        );
+        assert_eq!(
+            eval_comparison(&CompOp::Lt, &int(5), &int(3), &subst),
+            Some(false)
+        );
+        assert_eq!(
+            eval_comparison(&CompOp::Lt, &int(5), &int(5), &subst),
+            Some(false)
+        );
     }
 
     #[test]
@@ -289,7 +317,10 @@ mod tests {
         let left = arith("+", int(3), int(4));
         let right = int(7);
 
-        assert_eq!(eval_comparison(&CompOp::Eq, &left, &right, &subst), Some(true));
+        assert_eq!(
+            eval_comparison(&CompOp::Eq, &left, &right, &subst),
+            Some(true)
+        );
     }
 
     #[test]

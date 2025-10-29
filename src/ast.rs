@@ -55,17 +55,17 @@ pub struct ConstDecl {
 /// A choice rule: `{ atom1; atom2 }` or `1 { atom1; atom2 } 3`
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChoiceRule {
-    pub lower_bound: Option<Term>,  // None means 0, can be integer or constant name
-    pub upper_bound: Option<Term>,  // None means infinity, can be integer or constant name
+    pub lower_bound: Option<Term>, // None means 0, can be integer or constant name
+    pub upper_bound: Option<Term>, // None means infinity, can be integer or constant name
     pub elements: Vec<ChoiceElement>,
-    pub body: Vec<Literal>,  // Optional body like regular rules
+    pub body: Vec<Literal>, // Optional body like regular rules
 }
 
 /// An element in a choice rule
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChoiceElement {
     pub atom: Atom,
-    pub condition: Vec<Literal>,  // Optional condition after ':'
+    pub condition: Vec<Literal>, // Optional condition after ':'
 }
 
 /// A literal is either a positive or negative atom

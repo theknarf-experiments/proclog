@@ -1,8 +1,8 @@
-use crate::ast::{Rule, Atom, Constraint};
+use crate::ast::{Atom, Constraint, Rule};
 use crate::database::FactDatabase;
 use crate::grounding::{ground_rule, ground_rule_semi_naive, satisfy_body};
-use crate::stratification::{stratify, StratificationError};
 use crate::safety::{check_program_safety, SafetyError};
+use crate::stratification::{stratify, StratificationError};
 
 /// Errors that can occur during evaluation
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,8 +23,15 @@ impl std::fmt::Display for EvaluationError {
         match self {
             EvaluationError::Safety(e) => write!(f, "Safety error: {}", e),
             EvaluationError::Stratification(e) => write!(f, "Stratification error: {:?}", e),
-            EvaluationError::ConstraintViolation { constraint, violation_count } => {
-                write!(f, "Constraint '{}' violated {} time(s)", constraint, violation_count)
+            EvaluationError::ConstraintViolation {
+                constraint,
+                violation_count,
+            } => {
+                write!(
+                    f,
+                    "Constraint '{}' violated {} time(s)",
+                    constraint, violation_count
+                )
             }
         }
     }
@@ -138,7 +145,10 @@ pub struct EvaluationStats {
 }
 
 /// Instrumented naive evaluation that tracks statistics
-pub fn naive_evaluation_instrumented(rules: &[Rule], initial_facts: FactDatabase) -> (FactDatabase, EvaluationStats) {
+pub fn naive_evaluation_instrumented(
+    rules: &[Rule],
+    initial_facts: FactDatabase,
+) -> (FactDatabase, EvaluationStats) {
     let mut db = initial_facts;
     let mut changed = true;
     let mut stats = EvaluationStats {
@@ -172,7 +182,10 @@ pub fn naive_evaluation_instrumented(rules: &[Rule], initial_facts: FactDatabase
 }
 
 /// Instrumented semi-naive evaluation that tracks statistics
-pub fn semi_naive_evaluation_instrumented(rules: &[Rule], initial_facts: FactDatabase) -> (FactDatabase, EvaluationStats) {
+pub fn semi_naive_evaluation_instrumented(
+    rules: &[Rule],
+    initial_facts: FactDatabase,
+) -> (FactDatabase, EvaluationStats) {
     let mut db = initial_facts.clone();
     let mut delta = initial_facts;
     let mut stats = EvaluationStats {
@@ -231,7 +244,10 @@ pub fn semi_naive_evaluation_instrumented(rules: &[Rule], initial_facts: FactDat
 /// Check constraints against the database
 /// Returns an error if any constraint is violated
 /// A constraint is violated if its body is satisfied (i.e., there exist substitutions)
-pub fn check_constraints(constraints: &[Constraint], db: &FactDatabase) -> Result<(), EvaluationError> {
+pub fn check_constraints(
+    constraints: &[Constraint],
+    db: &FactDatabase,
+) -> Result<(), EvaluationError> {
     for constraint in constraints {
         let violations = satisfy_body(&constraint.body, db);
         if !violations.is_empty() {
@@ -277,7 +293,10 @@ pub fn stratified_evaluation_with_constraints(
 ///
 /// Note: This version doesn't check constraints. Use stratified_evaluation_with_constraints
 /// if you need constraint checking.
-pub fn stratified_evaluation(rules: &[Rule], initial_facts: FactDatabase) -> Result<FactDatabase, EvaluationError> {
+pub fn stratified_evaluation(
+    rules: &[Rule],
+    initial_facts: FactDatabase,
+) -> Result<FactDatabase, EvaluationError> {
     // Check safety first (variables in negation, etc.)
     check_program_safety(rules)?;
 
@@ -345,7 +364,10 @@ mod tests {
     #[test]
     fn test_naive_evaluation_no_rules() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("parent", vec![atom_const("john"), atom_const("mary")]));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_const("john"), atom_const("mary")],
+        ));
 
         let rules = vec![];
         let result = naive_evaluation(&rules, db.clone());
@@ -357,8 +379,14 @@ mod tests {
     #[test]
     fn test_naive_evaluation_one_iteration() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("parent", vec![atom_const("john"), atom_const("mary")]));
-        db.insert(make_atom("parent", vec![atom_const("mary"), atom_const("alice")]));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_const("john"), atom_const("mary")],
+        ));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_const("mary"), atom_const("alice")],
+        ));
 
         // Rule: grandparent(X, Z) :- parent(X, Y), parent(Y, Z).
         let rules = vec![make_rule(
@@ -392,7 +420,10 @@ mod tests {
         let rules = vec![
             make_rule(
                 make_atom("path", vec![var("X"), var("Y")]),
-                vec![Literal::Positive(make_atom("edge", vec![var("X"), var("Y")]))],
+                vec![Literal::Positive(make_atom(
+                    "edge",
+                    vec![var("X"), var("Y")],
+                ))],
             ),
             make_rule(
                 make_atom("path", vec![var("X"), var("Z")]),
@@ -420,7 +451,10 @@ mod tests {
     #[test]
     fn test_semi_naive_evaluation_no_rules() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("parent", vec![atom_const("john"), atom_const("mary")]));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_const("john"), atom_const("mary")],
+        ));
 
         let rules = vec![];
         let result = semi_naive_evaluation(&rules, db.clone());
@@ -431,8 +465,14 @@ mod tests {
     #[test]
     fn test_semi_naive_evaluation_one_iteration() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("parent", vec![atom_const("john"), atom_const("mary")]));
-        db.insert(make_atom("parent", vec![atom_const("mary"), atom_const("alice")]));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_const("john"), atom_const("mary")],
+        ));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_const("mary"), atom_const("alice")],
+        ));
 
         let rules = vec![make_rule(
             make_atom("grandparent", vec![var("X"), var("Z")]),
@@ -461,7 +501,10 @@ mod tests {
         let rules = vec![
             make_rule(
                 make_atom("path", vec![var("X"), var("Y")]),
-                vec![Literal::Positive(make_atom("edge", vec![var("X"), var("Y")]))],
+                vec![Literal::Positive(make_atom(
+                    "edge",
+                    vec![var("X"), var("Y")],
+                ))],
             ),
             make_rule(
                 make_atom("path", vec![var("X"), var("Z")]),
@@ -492,7 +535,10 @@ mod tests {
         let rules = vec![
             make_rule(
                 make_atom("path", vec![var("X"), var("Y")]),
-                vec![Literal::Positive(make_atom("edge", vec![var("X"), var("Y")]))],
+                vec![Literal::Positive(make_atom(
+                    "edge",
+                    vec![var("X"), var("Y")],
+                ))],
             ),
             make_rule(
                 make_atom("path", vec![var("X"), var("Z")]),
@@ -518,8 +564,8 @@ mod tests {
     // Integration test: Complete program execution
     #[test]
     fn test_integration_full_program_execution() {
-        use crate::parser;
         use crate::ast::Statement;
+        use crate::parser;
 
         // A complete ProcLog program with transitive closure
         let program_text = r#"
@@ -538,8 +584,7 @@ mod tests {
         "#;
 
         // Step 1: Parse
-        let program = parser::parse_program(program_text)
-            .expect("Should parse successfully");
+        let program = parser::parse_program(program_text).expect("Should parse successfully");
 
         // Step 2: Separate facts and rules
         let mut initial_db = FactDatabase::new();
@@ -607,7 +652,10 @@ mod tests {
         let rules = vec![
             make_rule(
                 make_atom("path", vec![var("X"), var("Y")]),
-                vec![Literal::Positive(make_atom("edge", vec![var("X"), var("Y")]))],
+                vec![Literal::Positive(make_atom(
+                    "edge",
+                    vec![var("X"), var("Y")],
+                ))],
             ),
             make_rule(
                 make_atom("path", vec![var("X"), var("Z")]),
@@ -648,7 +696,10 @@ mod tests {
         let rules = vec![
             make_rule(
                 make_atom("path", vec![var("X"), var("Y")]),
-                vec![Literal::Positive(make_atom("edge", vec![var("X"), var("Y")]))],
+                vec![Literal::Positive(make_atom(
+                    "edge",
+                    vec![var("X"), var("Y")],
+                ))],
             ),
             make_rule(
                 make_atom("path", vec![var("X"), var("Z")]),
@@ -687,7 +738,10 @@ mod tests {
         let rules = vec![
             make_rule(
                 make_atom("path", vec![var("X"), var("Y")]),
-                vec![Literal::Positive(make_atom("edge", vec![var("X"), var("Y")]))],
+                vec![Literal::Positive(make_atom(
+                    "edge",
+                    vec![var("X"), var("Y")],
+                ))],
             ),
             make_rule(
                 make_atom("path", vec![var("X"), var("Z")]),
@@ -727,7 +781,10 @@ mod tests {
         let rules = vec![
             make_rule(
                 make_atom("path", vec![var("X"), var("Y")]),
-                vec![Literal::Positive(make_atom("edge", vec![var("X"), var("Y")]))],
+                vec![Literal::Positive(make_atom(
+                    "edge",
+                    vec![var("X"), var("Y")],
+                ))],
             ),
             make_rule(
                 make_atom("path", vec![var("X"), var("Z")]),
@@ -746,8 +803,11 @@ mod tests {
 
         // Verify every path exists in both
         for fact in naive_result.all_facts() {
-            assert!(semi_naive_result.contains(fact),
-                "Semi-naive missing fact that naive derived: {:?}", fact);
+            assert!(
+                semi_naive_result.contains(fact),
+                "Semi-naive missing fact that naive derived: {:?}",
+                fact
+            );
         }
     }
 
@@ -755,15 +815,27 @@ mod tests {
     fn test_semi_naive_with_multiple_recursive_rules() {
         // Test case where multiple rules feed into each other
         let mut db = FactDatabase::new();
-        db.insert(make_atom("parent", vec![atom_const("alice"), atom_const("bob")]));
-        db.insert(make_atom("parent", vec![atom_const("bob"), atom_const("charlie")]));
-        db.insert(make_atom("parent", vec![atom_const("charlie"), atom_const("dave")]));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_const("alice"), atom_const("bob")],
+        ));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_const("bob"), atom_const("charlie")],
+        ));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_const("charlie"), atom_const("dave")],
+        ));
 
         let rules = vec![
             // ancestor(X,Y) :- parent(X,Y)
             make_rule(
                 make_atom("ancestor", vec![var("X"), var("Y")]),
-                vec![Literal::Positive(make_atom("parent", vec![var("X"), var("Y")]))],
+                vec![Literal::Positive(make_atom(
+                    "parent",
+                    vec![var("X"), var("Y")],
+                ))],
             ),
             // ancestor(X,Z) :- ancestor(X,Y), parent(Y,Z)
             make_rule(
@@ -795,8 +867,10 @@ mod tests {
         assert_eq!(ancestors.len(), 6);
 
         // Verify alice is ancestor of dave
-        assert!(result.contains(&make_atom("ancestor",
-            vec![atom_const("alice"), atom_const("dave")])));
+        assert!(result.contains(&make_atom(
+            "ancestor",
+            vec![atom_const("alice"), atom_const("dave")]
+        )));
 
         // No fact should be derived more than once
         let initial_facts = 3;
@@ -805,8 +879,8 @@ mod tests {
 
     #[test]
     fn test_integration_ancestor_example() {
-        use crate::parser;
         use crate::ast::Statement;
+        use crate::parser;
 
         // Family tree example
         let program_text = r#"
@@ -821,8 +895,7 @@ mod tests {
             ancestor(X, Z) :- ancestor(X, Y), parent(Y, Z).
         "#;
 
-        let program = parser::parse_program(program_text)
-            .expect("Should parse successfully");
+        let program = parser::parse_program(program_text).expect("Should parse successfully");
 
         let mut initial_db = FactDatabase::new();
         let mut rules = Vec::new();
@@ -850,7 +923,10 @@ mod tests {
         assert_eq!(ancestors_of_eve.len(), 3);
 
         // Verify alice is an ancestor of eve
-        assert!(result_db.contains(&make_atom("ancestor", vec![atom_const("alice"), atom_const("eve")])));
+        assert!(result_db.contains(&make_atom(
+            "ancestor",
+            vec![atom_const("alice"), atom_const("eve")]
+        )));
 
         // Query for all descendants of bob
         let query = make_atom("ancestor", vec![atom_const("bob"), var("Y")]);
@@ -944,8 +1020,8 @@ mod tests {
 
     #[test]
     fn test_stratified_evaluation_complex_example() {
-        use crate::parser;
         use crate::ast::Statement;
+        use crate::parser;
 
         // Complete program with stratified negation
         let program_text = r#"
@@ -965,8 +1041,7 @@ mod tests {
             needs_help(X) :- unemployed(X).
         "#;
 
-        let program = parser::parse_program(program_text)
-            .expect("Should parse successfully");
+        let program = parser::parse_program(program_text).expect("Should parse successfully");
 
         let mut initial_db = FactDatabase::new();
         let mut rules = Vec::new();
@@ -1002,8 +1077,8 @@ mod tests {
 
     #[test]
     fn test_stratified_evaluation_eligibility() {
-        use crate::parser;
         use crate::ast::Statement;
+        use crate::parser;
 
         // Eligibility example with multiple strata
         let program_text = r#"
@@ -1025,8 +1100,7 @@ mod tests {
             priority_candidate(X) :- needs_financial_aid(X).
         "#;
 
-        let program = parser::parse_program(program_text)
-            .expect("Should parse successfully");
+        let program = parser::parse_program(program_text).expect("Should parse successfully");
 
         let mut initial_db = FactDatabase::new();
         let mut rules = Vec::new();
@@ -1046,7 +1120,10 @@ mod tests {
         let result = stratified_evaluation(&rules, initial_db).unwrap();
 
         // charlie needs financial aid (no scholarship, no job)
-        assert!(result.contains(&make_atom("needs_financial_aid", vec![atom_const("charlie")])));
+        assert!(result.contains(&make_atom(
+            "needs_financial_aid",
+            vec![atom_const("charlie")]
+        )));
 
         // alice doesn't need aid (has scholarship)
         assert!(!result.contains(&make_atom("needs_financial_aid", vec![atom_const("alice")])));
@@ -1055,7 +1132,10 @@ mod tests {
         assert!(!result.contains(&make_atom("needs_financial_aid", vec![atom_const("bob")])));
 
         // charlie is a priority candidate
-        assert!(result.contains(&make_atom("priority_candidate", vec![atom_const("charlie")])));
+        assert!(result.contains(&make_atom(
+            "priority_candidate",
+            vec![atom_const("charlie")]
+        )));
 
         let needs_aid_pred = Intern::new("needs_financial_aid".to_string());
         let needs_aid = result.get_by_predicate(&needs_aid_pred);
@@ -1065,8 +1145,8 @@ mod tests {
     // Complex tests combining stratification with semi-naive evaluation
     #[test]
     fn test_stratified_with_transitive_closure_and_negation() {
-        use crate::parser;
         use crate::ast::Statement;
+        use crate::parser;
 
         // Reachability with blocked nodes
         let program_text = r#"
@@ -1091,8 +1171,7 @@ mod tests {
             safe_reachable(X, Z) :- safe_reachable(X, Y), edge(Y, Z), not blocked(Z).
         "#;
 
-        let program = parser::parse_program(program_text)
-            .expect("Should parse successfully");
+        let program = parser::parse_program(program_text).expect("Should parse successfully");
 
         let mut initial_db = FactDatabase::new();
         let mut rules = Vec::new();
@@ -1112,16 +1191,34 @@ mod tests {
         let result = stratified_evaluation(&rules, initial_db).unwrap();
 
         // Should reach d and e from a (via b->c->d->e)
-        assert!(result.contains(&make_atom("safe_reachable", vec![atom_const("a"), atom_const("d")])));
-        assert!(result.contains(&make_atom("safe_reachable", vec![atom_const("a"), atom_const("e")])));
+        assert!(result.contains(&make_atom(
+            "safe_reachable",
+            vec![atom_const("a"), atom_const("d")]
+        )));
+        assert!(result.contains(&make_atom(
+            "safe_reachable",
+            vec![atom_const("a"), atom_const("e")]
+        )));
 
         // Should NOT reach x or y (blocked)
-        assert!(!result.contains(&make_atom("safe_reachable", vec![atom_const("a"), atom_const("x")])));
-        assert!(!result.contains(&make_atom("safe_reachable", vec![atom_const("a"), atom_const("y")])));
+        assert!(!result.contains(&make_atom(
+            "safe_reachable",
+            vec![atom_const("a"), atom_const("x")]
+        )));
+        assert!(!result.contains(&make_atom(
+            "safe_reachable",
+            vec![atom_const("a"), atom_const("y")]
+        )));
 
         // Verify we computed full reachability in stratum 0
-        assert!(result.contains(&make_atom("reachable", vec![atom_const("a"), atom_const("x")])));
-        assert!(result.contains(&make_atom("reachable", vec![atom_const("x"), atom_const("y")])));
+        assert!(result.contains(&make_atom(
+            "reachable",
+            vec![atom_const("a"), atom_const("x")]
+        )));
+        assert!(result.contains(&make_atom(
+            "reachable",
+            vec![atom_const("x"), atom_const("y")]
+        )));
 
         let safe_pred = Intern::new("safe_reachable".to_string());
         let safe_facts = result.get_by_predicate(&safe_pred);
@@ -1136,8 +1233,8 @@ mod tests {
 
     #[test]
     fn test_stratified_ancestor_with_exclusions() {
-        use crate::parser;
         use crate::ast::Statement;
+        use crate::parser;
 
         // Family tree with estrangement
         let program_text = r#"
@@ -1160,8 +1257,7 @@ mod tests {
             recognized_family(X, Z) :- recognized_family(X, Y), parent(Y, Z), not estranged(Z).
         "#;
 
-        let program = parser::parse_program(program_text)
-            .expect("Should parse successfully");
+        let program = parser::parse_program(program_text).expect("Should parse successfully");
 
         let mut initial_db = FactDatabase::new();
         let mut rules = Vec::new();
@@ -1181,22 +1277,34 @@ mod tests {
         let result = stratified_evaluation(&rules, initial_db).unwrap();
 
         // Grandpa -> dad -> alice should exist in ancestor
-        assert!(result.contains(&make_atom("ancestor", vec![atom_const("grandpa"), atom_const("alice")])));
+        assert!(result.contains(&make_atom(
+            "ancestor",
+            vec![atom_const("grandpa"), atom_const("alice")]
+        )));
 
         // But NOT in recognized_family (dad is estranged)
-        assert!(!result.contains(&make_atom("recognized_family", vec![atom_const("grandpa"), atom_const("alice")])));
+        assert!(!result.contains(&make_atom(
+            "recognized_family",
+            vec![atom_const("grandpa"), atom_const("alice")]
+        )));
 
         // Alice -> charlie should be in recognized_family (neither estranged)
-        assert!(result.contains(&make_atom("recognized_family", vec![atom_const("alice"), atom_const("charlie")])));
+        assert!(result.contains(&make_atom(
+            "recognized_family",
+            vec![atom_const("alice"), atom_const("charlie")]
+        )));
 
         // Uncle -> eve should be in recognized_family
-        assert!(result.contains(&make_atom("recognized_family", vec![atom_const("uncle"), atom_const("eve")])));
+        assert!(result.contains(&make_atom(
+            "recognized_family",
+            vec![atom_const("uncle"), atom_const("eve")]
+        )));
     }
 
     #[test]
     fn test_stratified_multiple_recursive_predicates_with_negation() {
-        use crate::parser;
         use crate::ast::Statement;
+        use crate::parser;
 
         // Complex dependency graph with recursion and negation
         let program_text = r#"
@@ -1222,8 +1330,7 @@ mod tests {
             safe_path(X, Z) :- safe_path(X, Y), edge(Y, Z), not dangerous(edge(Y, Z)), not in_cycle(Z).
         "#;
 
-        let program = parser::parse_program(program_text)
-            .expect("Should parse successfully");
+        let program = parser::parse_program(program_text).expect("Should parse successfully");
 
         let mut initial_db = FactDatabase::new();
         let mut rules = Vec::new();
@@ -1252,13 +1359,28 @@ mod tests {
         assert!(!result.contains(&make_atom("in_cycle", vec![atom_const("d")])));
 
         // Safe paths should exist from b to d (none of them in cycles)
-        assert!(result.contains(&make_atom("safe_path", vec![atom_const("b"), atom_const("c")])));
-        assert!(result.contains(&make_atom("safe_path", vec![atom_const("c"), atom_const("d")])));
-        assert!(result.contains(&make_atom("safe_path", vec![atom_const("b"), atom_const("d")])));
+        assert!(result.contains(&make_atom(
+            "safe_path",
+            vec![atom_const("b"), atom_const("c")]
+        )));
+        assert!(result.contains(&make_atom(
+            "safe_path",
+            vec![atom_const("c"), atom_const("d")]
+        )));
+        assert!(result.contains(&make_atom(
+            "safe_path",
+            vec![atom_const("b"), atom_const("d")]
+        )));
 
         // Safe paths should NOT involve a or x (in cycles)
-        assert!(!result.contains(&make_atom("safe_path", vec![atom_const("a"), atom_const("b")])));
-        assert!(!result.contains(&make_atom("safe_path", vec![atom_const("a"), atom_const("x")])));
+        assert!(!result.contains(&make_atom(
+            "safe_path",
+            vec![atom_const("a"), atom_const("b")]
+        )));
+        assert!(!result.contains(&make_atom(
+            "safe_path",
+            vec![atom_const("a"), atom_const("x")]
+        )));
     }
 
     #[test]
@@ -1281,7 +1403,10 @@ mod tests {
         let rules = vec![
             make_rule(
                 make_atom("reach", vec![var("X"), var("Y")]),
-                vec![Literal::Positive(make_atom("edge", vec![var("X"), var("Y")]))],
+                vec![Literal::Positive(make_atom(
+                    "edge",
+                    vec![var("X"), var("Y")],
+                ))],
             ),
             make_rule(
                 make_atom("reach", vec![var("X"), var("Z")]),
@@ -1309,19 +1434,28 @@ mod tests {
         let full_result = stratified_evaluation(&rules, db).unwrap();
 
         // n5 is special, so normal_reach should NOT include it as destination
-        assert!(!full_result.contains(&make_atom("normal_reach", vec![atom_const("n0"), atom_const("n5")])));
+        assert!(!full_result.contains(&make_atom(
+            "normal_reach",
+            vec![atom_const("n0"), atom_const("n5")]
+        )));
 
         // But should reach n4 (not special)
-        assert!(full_result.contains(&make_atom("normal_reach", vec![atom_const("n0"), atom_const("n4")])));
+        assert!(full_result.contains(&make_atom(
+            "normal_reach",
+            vec![atom_const("n0"), atom_const("n4")]
+        )));
 
         // And should reach n6+ (after the special node)
-        assert!(full_result.contains(&make_atom("normal_reach", vec![atom_const("n0"), atom_const("n6")])));
+        assert!(full_result.contains(&make_atom(
+            "normal_reach",
+            vec![atom_const("n0"), atom_const("n6")]
+        )));
     }
 
     #[test]
     fn test_stratified_double_negation() {
-        use crate::parser;
         use crate::ast::Statement;
+        use crate::parser;
 
         // Test multiple levels of negation
         let program_text = r#"
@@ -1341,8 +1475,7 @@ mod tests {
             non_included(X) :- base(X), not included(X).
         "#;
 
-        let program = parser::parse_program(program_text)
-            .expect("Should parse successfully");
+        let program = parser::parse_program(program_text).expect("Should parse successfully");
 
         let mut initial_db = FactDatabase::new();
         let mut rules = Vec::new();
@@ -1381,8 +1514,8 @@ mod tests {
 
     #[test]
     fn test_stratified_game_states_with_recursion() {
-        use crate::parser;
         use crate::ast::Statement;
+        use crate::parser;
 
         // Game state exploration with forbidden states
         let program_text = r#"
@@ -1414,8 +1547,7 @@ mod tests {
             safely_reachable(S) :- safely_reachable(S0), safe_transition(S0, S).
         "#;
 
-        let program = parser::parse_program(program_text)
-            .expect("Should parse successfully");
+        let program = parser::parse_program(program_text).expect("Should parse successfully");
 
         let mut initial_db = FactDatabase::new();
         let mut rules = Vec::new();
@@ -1457,13 +1589,28 @@ mod tests {
         assert!(result.contains(&make_atom("safely_reachable", vec![atom_const("s3")])));
 
         // Verify safe_transition exists for safe paths but NOT through danger
-        assert!(result.contains(&make_atom("safe_transition", vec![atom_const("start"), atom_const("s1")])));
-        assert!(result.contains(&make_atom("safe_transition", vec![atom_const("s1"), atom_const("s2")])));
-        assert!(result.contains(&make_atom("safe_transition", vec![atom_const("s2"), atom_const("s3")])));
+        assert!(result.contains(&make_atom(
+            "safe_transition",
+            vec![atom_const("start"), atom_const("s1")]
+        )));
+        assert!(result.contains(&make_atom(
+            "safe_transition",
+            vec![atom_const("s1"), atom_const("s2")]
+        )));
+        assert!(result.contains(&make_atom(
+            "safe_transition",
+            vec![atom_const("s2"), atom_const("s3")]
+        )));
 
         // Dangerous transitions should NOT be safe_transitions
-        assert!(!result.contains(&make_atom("safe_transition", vec![atom_const("s1"), atom_const("danger")])));
-        assert!(!result.contains(&make_atom("safe_transition", vec![atom_const("danger"), atom_const("s3")])));
+        assert!(!result.contains(&make_atom(
+            "safe_transition",
+            vec![atom_const("s1"), atom_const("danger")]
+        )));
+        assert!(!result.contains(&make_atom(
+            "safe_transition",
+            vec![atom_const("danger"), atom_const("s3")]
+        )));
     }
 
     // Comprehensive datatype tests
@@ -1478,22 +1625,37 @@ mod tests {
         db.insert(make_atom("score", vec![int(0)]));
 
         // Float facts
-        db.insert(make_atom("position", vec![atom_const("player"), float(3.14), float(-2.5)]));
+        db.insert(make_atom(
+            "position",
+            vec![atom_const("player"), float(3.14), float(-2.5)],
+        ));
         db.insert(make_atom("speed", vec![float(10.5)]));
 
         // Boolean facts
-        db.insert(make_atom("is_alive", vec![atom_const("player"), boolean(true)]));
-        db.insert(make_atom("has_key", vec![atom_const("player"), boolean(false)]));
+        db.insert(make_atom(
+            "is_alive",
+            vec![atom_const("player"), boolean(true)],
+        ));
+        db.insert(make_atom(
+            "has_key",
+            vec![atom_const("player"), boolean(false)],
+        ));
 
         // String facts
-        db.insert(make_atom("name", vec![atom_const("player"), string("Alice")]));
+        db.insert(make_atom(
+            "name",
+            vec![atom_const("player"), string("Alice")],
+        ));
         db.insert(make_atom("message", vec![string("Hello")]));
 
         // Compound term facts
-        db.insert(make_atom("inventory", vec![
-            atom_const("player"),
-            compound("item", vec![atom_const("sword"), int(10), float(5.5)])
-        ]));
+        db.insert(make_atom(
+            "inventory",
+            vec![
+                atom_const("player"),
+                compound("item", vec![atom_const("sword"), int(10), float(5.5)]),
+            ],
+        ));
 
         // Rules using different datatypes
         let rules = vec![
@@ -1508,19 +1670,21 @@ mod tests {
             // Rule: healthy if health > 50
             make_rule(
                 make_atom("healthy", vec![var("P")]),
-                vec![
-                    Literal::Positive(make_atom("health", vec![var("P"), int(100)])),
-                ],
+                vec![Literal::Positive(make_atom(
+                    "health",
+                    vec![var("P"), int(100)],
+                ))],
             ),
             // Rule: has_weapon if inventory contains item with type sword
             make_rule(
                 make_atom("has_weapon", vec![var("P")]),
-                vec![
-                    Literal::Positive(make_atom("inventory", vec![
+                vec![Literal::Positive(make_atom(
+                    "inventory",
+                    vec![
                         var("P"),
-                        compound("item", vec![atom_const("sword"), var("Qty"), var("Weight")])
-                    ])),
-                ],
+                        compound("item", vec![atom_const("sword"), var("Qty"), var("Weight")]),
+                    ],
+                ))],
             ),
             // Rule: greeting using string
             make_rule(
@@ -1544,7 +1708,10 @@ mod tests {
         assert!(result.contains(&make_atom("has_weapon", vec![atom_const("player")])));
 
         // Verify string propagation worked
-        assert!(result.contains(&make_atom("greeting", vec![atom_const("player"), string("Hello")])));
+        assert!(result.contains(&make_atom(
+            "greeting",
+            vec![atom_const("player"), string("Hello")]
+        )));
 
         // Query with integer
         let health_query = make_atom("health", vec![var("Who"), int(100)]);
@@ -1566,8 +1733,8 @@ mod tests {
 
     #[test]
     fn test_negation_with_different_datatypes() {
-        use crate::parser;
         use crate::ast::Statement;
+        use crate::parser;
 
         let program_text = r#"
             % Player stats
@@ -1590,8 +1757,7 @@ mod tests {
             will_take_damage(P, D) :- vulnerable(P), base_damage(D).
         "#;
 
-        let program = parser::parse_program(program_text)
-            .expect("Should parse successfully");
+        let program = parser::parse_program(program_text).expect("Should parse successfully");
 
         let mut initial_db = FactDatabase::new();
         let mut rules = Vec::new();
@@ -1617,11 +1783,20 @@ mod tests {
         assert!(!result.contains(&make_atom("vulnerable", vec![atom_const("alice")])));
 
         // Bob will take damage (vulnerable)
-        assert!(result.contains(&make_atom("will_take_damage", vec![atom_const("bob"), int(10)])));
-        assert!(result.contains(&make_atom("will_take_damage", vec![atom_const("bob"), int(20)])));
+        assert!(result.contains(&make_atom(
+            "will_take_damage",
+            vec![atom_const("bob"), int(10)]
+        )));
+        assert!(result.contains(&make_atom(
+            "will_take_damage",
+            vec![atom_const("bob"), int(20)]
+        )));
 
         // Alice will NOT take damage (not vulnerable)
-        assert!(!result.contains(&make_atom("will_take_damage", vec![atom_const("alice"), int(10)])));
+        assert!(!result.contains(&make_atom(
+            "will_take_damage",
+            vec![atom_const("alice"), int(10)]
+        )));
 
         let vulnerable_pred = Intern::new("vulnerable".to_string());
         let vulnerable = result.get_by_predicate(&vulnerable_pred);
@@ -1633,20 +1808,29 @@ mod tests {
         let mut db = FactDatabase::new();
 
         // Graph with compound term labels
-        db.insert(make_atom("edge", vec![
-            compound("node", vec![atom_const("a"), int(1)]),
-            compound("node", vec![atom_const("b"), int(2)])
-        ]));
-        db.insert(make_atom("edge", vec![
-            compound("node", vec![atom_const("b"), int(2)]),
-            compound("node", vec![atom_const("c"), int(3)])
-        ]));
+        db.insert(make_atom(
+            "edge",
+            vec![
+                compound("node", vec![atom_const("a"), int(1)]),
+                compound("node", vec![atom_const("b"), int(2)]),
+            ],
+        ));
+        db.insert(make_atom(
+            "edge",
+            vec![
+                compound("node", vec![atom_const("b"), int(2)]),
+                compound("node", vec![atom_const("c"), int(3)]),
+            ],
+        ));
 
         // Transitive closure with compound terms
         let rules = vec![
             make_rule(
                 make_atom("path", vec![var("X"), var("Y")]),
-                vec![Literal::Positive(make_atom("edge", vec![var("X"), var("Y")]))],
+                vec![Literal::Positive(make_atom(
+                    "edge",
+                    vec![var("X"), var("Y")],
+                ))],
             ),
             make_rule(
                 make_atom("path", vec![var("X"), var("Z")]),
@@ -1660,10 +1844,13 @@ mod tests {
         let result = semi_naive_evaluation(&rules, db);
 
         // Should derive path from node(a,1) to node(c,3)
-        assert!(result.contains(&make_atom("path", vec![
-            compound("node", vec![atom_const("a"), int(1)]),
-            compound("node", vec![atom_const("c"), int(3)])
-        ])));
+        assert!(result.contains(&make_atom(
+            "path",
+            vec![
+                compound("node", vec![atom_const("a"), int(1)]),
+                compound("node", vec![atom_const("c"), int(3)])
+            ]
+        )));
 
         let path_pred = Intern::new("path".to_string());
         let paths = result.get_by_predicate(&path_pred);
@@ -1682,8 +1869,14 @@ mod tests {
         db.insert(make_atom("temp", vec![atom_const("room3"), float(25.5)]));
 
         // Labels
-        db.insert(make_atom("label", vec![atom_const("room1"), string("comfortable")]));
-        db.insert(make_atom("label", vec![atom_const("room3"), string("warm")]));
+        db.insert(make_atom(
+            "label",
+            vec![atom_const("room1"), string("comfortable")],
+        ));
+        db.insert(make_atom(
+            "label",
+            vec![atom_const("room3"), string("warm")],
+        ));
         // room2 has no label
 
         // Rules - rewritten to be safe:
@@ -1692,9 +1885,10 @@ mod tests {
             // has_label(R) :- label(R, L).
             make_rule(
                 make_atom("has_label", vec![var("R")]),
-                vec![
-                    Literal::Positive(make_atom("label", vec![var("R"), var("L")])),
-                ],
+                vec![Literal::Positive(make_atom(
+                    "label",
+                    vec![var("R"), var("L")],
+                ))],
             ),
             // unlabeled(R) :- temp(R, T), not has_label(R).
             make_rule(
@@ -1753,7 +1947,10 @@ mod tests {
         let result = check_constraints(&constraints, &db);
         assert!(result.is_err());
 
-        if let Err(EvaluationError::ConstraintViolation { violation_count, .. }) = result {
+        if let Err(EvaluationError::ConstraintViolation {
+            violation_count, ..
+        }) = result
+        {
             assert_eq!(violation_count, 1);
         } else {
             panic!("Expected ConstraintViolation error");
@@ -1775,7 +1972,10 @@ mod tests {
         let result = check_constraints(&constraints, &db);
         assert!(result.is_err());
 
-        if let Err(EvaluationError::ConstraintViolation { violation_count, .. }) = result {
+        if let Err(EvaluationError::ConstraintViolation {
+            violation_count, ..
+        }) = result
+        {
             assert_eq!(violation_count, 3);
         }
     }
@@ -1821,7 +2021,10 @@ mod tests {
         let result = check_constraints(&constraints, &db);
         assert!(result.is_err());
 
-        if let Err(EvaluationError::ConstraintViolation { violation_count, .. }) = result {
+        if let Err(EvaluationError::ConstraintViolation {
+            violation_count, ..
+        }) = result
+        {
             assert_eq!(violation_count, 1); // bob violates
         }
     }
@@ -1838,7 +2041,10 @@ mod tests {
         let rules = vec![
             make_rule(
                 make_atom("path", vec![var("X"), var("Y")]),
-                vec![Literal::Positive(make_atom("edge", vec![var("X"), var("Y")]))],
+                vec![Literal::Positive(make_atom(
+                    "edge",
+                    vec![var("X"), var("Y")],
+                ))],
             ),
             make_rule(
                 make_atom("path", vec![var("X"), var("Z")]),
@@ -1875,7 +2081,10 @@ mod tests {
         let rules = vec![
             make_rule(
                 make_atom("path", vec![var("X"), var("Y")]),
-                vec![Literal::Positive(make_atom("edge", vec![var("X"), var("Y")]))],
+                vec![Literal::Positive(make_atom(
+                    "edge",
+                    vec![var("X"), var("Y")],
+                ))],
             ),
             make_rule(
                 make_atom("path", vec![var("X"), var("Z")]),
@@ -2011,9 +2220,18 @@ mod tests {
     #[test]
     fn test_facts_only_with_query() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("parent", vec![atom_const("john"), atom_const("mary")]));
-        db.insert(make_atom("parent", vec![atom_const("john"), atom_const("bob")]));
-        db.insert(make_atom("parent", vec![atom_const("mary"), atom_const("alice")]));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_const("john"), atom_const("mary")],
+        ));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_const("john"), atom_const("bob")],
+        ));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_const("mary"), atom_const("alice")],
+        ));
 
         // Query: parent(john, X)?
         let query = make_atom("parent", vec![atom_const("john"), var("X")]);
@@ -2044,11 +2262,17 @@ mod tests {
         let rules = vec![
             make_rule(
                 make_atom("path", vec![var("X"), var("Y")]),
-                vec![Literal::Positive(make_atom("edge", vec![var("X"), var("Y")]))],
+                vec![Literal::Positive(make_atom(
+                    "edge",
+                    vec![var("X"), var("Y")],
+                ))],
             ),
             make_rule(
                 make_atom("path", vec![var("X"), var("Y")]),
-                vec![Literal::Positive(make_atom("edge", vec![var("X"), var("Y")]))],
+                vec![Literal::Positive(make_atom(
+                    "edge",
+                    vec![var("X"), var("Y")],
+                ))],
             ),
         ];
 
@@ -2112,10 +2336,7 @@ mod tests {
                     Intern::new("item".to_string()),
                     vec![
                         atom_const("weapon"),
-                        Term::Compound(
-                            Intern::new("stats".to_string()),
-                            vec![int(10), int(5)],
-                        ),
+                        Term::Compound(Intern::new("stats".to_string()), vec![int(10), int(5)]),
                     ],
                 ),
             ],
@@ -2201,9 +2422,13 @@ mod tests {
             let next_predicate = format!("level{}", i + 1);
 
             rules.push(make_rule(
-                make_atom(&next_predicate, vec![
-                    Term::Compound(Intern::new("wrap".to_string()), vec![var("X")])
-                ]),
+                make_atom(
+                    &next_predicate,
+                    vec![Term::Compound(
+                        Intern::new("wrap".to_string()),
+                        vec![var("X")],
+                    )],
+                ),
                 vec![Literal::Positive(make_atom(&predicate, vec![var("X")]))],
             ));
         }
@@ -2246,7 +2471,10 @@ mod tests {
         let rules = vec![
             make_rule(
                 make_atom("path", vec![var("X"), var("Y")]),
-                vec![Literal::Positive(make_atom("edge", vec![var("X"), var("Y")]))],
+                vec![Literal::Positive(make_atom(
+                    "edge",
+                    vec![var("X"), var("Y")],
+                ))],
             ),
             make_rule(
                 make_atom("path", vec![var("X"), var("Z")]),
@@ -2260,7 +2488,10 @@ mod tests {
         let result = stratified_evaluation(&rules, db).unwrap();
 
         // Should be able to reach from n0 to n100
-        assert!(result.contains(&make_atom("path", vec![atom_const("n0"), atom_const("n100")])));
+        assert!(result.contains(&make_atom(
+            "path",
+            vec![atom_const("n0"), atom_const("n100")]
+        )));
 
         // Should have path(n0, nX) for all X from 1 to 100
         let path_pred = Intern::new("path".to_string());
@@ -2290,7 +2521,10 @@ mod tests {
         let rules = vec![
             make_rule(
                 make_atom("path", vec![var("X"), var("Y")]),
-                vec![Literal::Positive(make_atom("edge", vec![var("X"), var("Y")]))],
+                vec![Literal::Positive(make_atom(
+                    "edge",
+                    vec![var("X"), var("Y")],
+                ))],
             ),
             make_rule(
                 make_atom("path", vec![var("X"), var("Z")]),
@@ -2305,10 +2539,20 @@ mod tests {
 
         // Check that semi-naive is efficient
         // Should converge in approximately 50 iterations (length of chain)
-        println!("Long chain (50 nodes) stats: {} iterations", stats.iterations);
-        assert!(stats.iterations < 100, "Too many iterations: {}", stats.iterations);
+        println!(
+            "Long chain (50 nodes) stats: {} iterations",
+            stats.iterations
+        );
+        assert!(
+            stats.iterations < 100,
+            "Too many iterations: {}",
+            stats.iterations
+        );
 
         // Verify correctness
-        assert!(result.contains(&make_atom("path", vec![atom_const("n0"), atom_const("n50")])));
+        assert!(result.contains(&make_atom(
+            "path",
+            vec![atom_const("n0"), atom_const("n50")]
+        )));
     }
 }

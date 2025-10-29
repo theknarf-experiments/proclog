@@ -19,13 +19,15 @@ fn number() -> impl Parser<char, Value, Error = ParseError> + Clone {
             if let Some(frac) = frac {
                 // It's a float
                 let num_str = format!("{}{}.{}", sign_str, whole, frac);
-                num_str.parse::<f64>()
+                num_str
+                    .parse::<f64>()
                     .map(Value::Float)
                     .map_err(|_| ParseError::custom(span, "invalid float"))
             } else {
                 // It's an integer
                 let num_str = format!("{}{}", sign_str, whole);
-                num_str.parse::<i64>()
+                num_str
+                    .parse::<i64>()
                     .map(Value::Integer)
                     .map_err(|_| ParseError::custom(span, "invalid integer"))
             }
@@ -35,27 +37,32 @@ fn number() -> impl Parser<char, Value, Error = ParseError> + Clone {
 
 /// Parse a lowercase identifier (starts with lowercase, not underscore)
 fn lowercase_ident() -> impl Parser<char, String, Error = ParseError> + Clone {
-    text::ident().try_map(|s: String, span| {
-        if s.chars().next().unwrap().is_lowercase() {
-            Ok(s)
-        } else {
-            Err(ParseError::custom(span, "expected lowercase identifier"))
-        }
-    })
-    .labelled("lowercase identifier")
+    text::ident()
+        .try_map(|s: String, span| {
+            if s.chars().next().unwrap().is_lowercase() {
+                Ok(s)
+            } else {
+                Err(ParseError::custom(span, "expected lowercase identifier"))
+            }
+        })
+        .labelled("lowercase identifier")
 }
 
 /// Parse an uppercase identifier (variable - starts with uppercase or underscore)
 fn uppercase_ident() -> impl Parser<char, String, Error = ParseError> + Clone {
-    text::ident().try_map(|s: String, span| {
-        let first = s.chars().next().unwrap();
-        if first.is_uppercase() || first == '_' {
-            Ok(s)
-        } else {
-            Err(ParseError::custom(span, "expected uppercase identifier or underscore (variable)"))
-        }
-    })
-    .labelled("variable")
+    text::ident()
+        .try_map(|s: String, span| {
+            let first = s.chars().next().unwrap();
+            if first.is_uppercase() || first == '_' {
+                Ok(s)
+            } else {
+                Err(ParseError::custom(
+                    span,
+                    "expected uppercase identifier or underscore (variable)",
+                ))
+            }
+        })
+        .labelled("variable")
 }
 
 /// Parse a string literal
@@ -74,7 +81,7 @@ fn operator() -> impl Parser<char, String, Error = ParseError> + Clone {
         just(">=").to(">="),
         just("!=").to("!="),
         just("\\=").to("\\="),
-        just("=<").to("=<"),  // Alternative syntax for <=
+        just("=<").to("=<"), // Alternative syntax for <=
         just("=").to("="),
         just("<").to("<"),
         just(">").to(">"),
@@ -95,17 +102,16 @@ fn term() -> impl Parser<char, Term, Error = ParseError> + Clone {
     recursive(|term| {
         // Base factors: variables, numbers, strings, atoms, compound terms, parentheses
         let factor = {
-            let variable = uppercase_ident()
-                .map(|s| Term::Variable(Intern::new(s)));
+            let variable = uppercase_ident().map(|s| Term::Variable(Intern::new(s)));
 
-            let number_const = number()
-                .map(|v| Term::Constant(v));
+            let number_const = number().map(|v| Term::Constant(v));
 
-            let string_const = string_literal()
-                .map(|s| Term::Constant(Value::String(Intern::new(s))));
+            let string_const =
+                string_literal().map(|s| Term::Constant(Value::String(Intern::new(s))));
 
             // Parenthesized term
-            let parens = term.clone()
+            let parens = term
+                .clone()
                 .delimited_by(just('(').padded(), just(')').padded());
 
             // Compound term or atom (lowercase identifier with optional args)
@@ -114,7 +120,7 @@ fn term() -> impl Parser<char, Term, Error = ParseError> + Clone {
                     term.clone()
                         .separated_by(just(',').padded())
                         .delimited_by(just('(').padded(), just(')').padded())
-                        .or_not()
+                        .or_not(),
                 )
                 .map(|(name, args)| {
                     if let Some(args) = args {
@@ -141,57 +147,48 @@ fn term() -> impl Parser<char, Term, Error = ParseError> + Clone {
         // Check if we have a range (term..term) - must check before arithmetic
         // Ranges can only have integer or atom constants as bounds
         let range_bound = choice((
-            text::int(10)
-                .try_map(|s: String, span: std::ops::Range<usize>| {
-                    s.parse::<i64>()
-                        .map(|n| Term::Constant(Value::Integer(n)))
-                        .map_err(|_| ParseError::custom(span, "invalid integer"))
-                }),
-            lowercase_ident()
-                .map(|s| Term::Constant(Value::Atom(Intern::new(s)))),
+            text::int(10).try_map(|s: String, span: std::ops::Range<usize>| {
+                s.parse::<i64>()
+                    .map(|n| Term::Constant(Value::Integer(n)))
+                    .map_err(|_| ParseError::custom(span, "invalid integer"))
+            }),
+            lowercase_ident().map(|s| Term::Constant(Value::Atom(Intern::new(s)))),
         ));
 
-        let range = range_bound.clone()
+        let range = range_bound
+            .clone()
             .then_ignore(just("..").padded())
             .then(range_bound)
             .map(|(start, end)| Term::Range(Box::new(start), Box::new(end)));
 
         // Try range first, then arithmetic with precedence
-        choice((
-            range,
-            {
-                // Middle precedence: *, /, mod
-                let mul_div = factor.clone()
-                    .then(
-                        choice((
-                            just('*').to("*"),
-                            just('/').to("/"),
-                            just("mod").to("mod"),
-                        ))
+        choice((range, {
+            // Middle precedence: *, /, mod
+            let mul_div = factor
+                .clone()
+                .then(
+                    choice((just('*').to("*"), just('/').to("/"), just("mod").to("mod")))
                         .padded()
                         .then(factor.clone())
-                        .repeated()
-                    )
-                    .foldl(|left, (op, right)| {
-                        Term::Compound(Intern::new(op.to_string()), vec![left, right])
-                    });
+                        .repeated(),
+                )
+                .foldl(|left, (op, right)| {
+                    Term::Compound(Intern::new(op.to_string()), vec![left, right])
+                });
 
-                // Lowest precedence: +, -
-                mul_div.clone()
-                    .then(
-                        choice((
-                            just('+').to("+"),
-                            just('-').to("-"),
-                        ))
+            // Lowest precedence: +, -
+            mul_div
+                .clone()
+                .then(
+                    choice((just('+').to("+"), just('-').to("-")))
                         .padded()
                         .then(mul_div)
-                        .repeated()
-                    )
-                    .foldl(|left, (op, right)| {
-                        Term::Compound(Intern::new(op.to_string()), vec![left, right])
-                    })
-            }
-        ))
+                        .repeated(),
+                )
+                .foldl(|left, (op, right)| {
+                    Term::Compound(Intern::new(op.to_string()), vec![left, right])
+                })
+        }))
         .padded()
     })
     .labelled("term")
@@ -200,17 +197,14 @@ fn term() -> impl Parser<char, Term, Error = ParseError> + Clone {
 /// Parse an atom
 fn atom() -> impl Parser<char, Atom, Error = ParseError> + Clone {
     // Parse either a regular identifier or an operator as the predicate
-    let predicate = choice((
-        lowercase_ident(),
-        operator(),
-    ));
+    let predicate = choice((lowercase_ident(), operator()));
 
     predicate
         .then(
             term()
                 .separated_by(just(',').padded())
                 .delimited_by(just('('), just(')'))
-                .or_not()
+                .or_not(),
         )
         .map(|(predicate, terms)| Atom {
             predicate: Intern::new(predicate),
@@ -222,16 +216,19 @@ fn atom() -> impl Parser<char, Atom, Error = ParseError> + Clone {
 /// Parse an infix comparison as an atom (e.g., X > 3, Y = 5)
 fn infix_comparison() -> impl Parser<char, Atom, Error = ParseError> + Clone {
     term()
-        .then(choice((
-            just("<=").to("<="),
-            just(">=").to(">="),
-            just("!=").to("!="),
-            just("\\=").to("\\="),
-            just("=<").to("=<"),
-            just("=").to("="),
-            just("<").to("<"),
-            just(">").to(">"),
-        )).padded())
+        .then(
+            choice((
+                just("<=").to("<="),
+                just(">=").to(">="),
+                just("!=").to("!="),
+                just("\\=").to("\\="),
+                just("=<").to("=<"),
+                just("=").to("="),
+                just("<").to("<"),
+                just(">").to(">"),
+            ))
+            .padded(),
+        )
         .then(term())
         .map(|((left, op), right)| Atom {
             predicate: Intern::new(op.to_string()),
@@ -246,11 +243,9 @@ fn literal() -> impl Parser<char, Literal, Error = ParseError> + Clone {
         .ignore_then(choice((infix_comparison(), atom())))
         .map(Literal::Negative);
 
-    let positive = choice((infix_comparison(), atom()))
-        .map(Literal::Positive);
+    let positive = choice((infix_comparison(), atom())).map(Literal::Positive);
 
-    negated.or(positive)
-        .labelled("literal")
+    negated.or(positive).labelled("literal")
 }
 
 /// Parse a line comment (starts with % and goes to end of line)
@@ -274,7 +269,7 @@ fn block_comment() -> impl Parser<char, (), Error = ParseError> + Clone {
                 just('*').then(filter(|c| *c != '/')).ignored(),
             ))
             .repeated()
-            .then(just("*/"))
+            .then(just("*/")),
         )
         .ignored()
         .labelled("block comment")
@@ -297,11 +292,7 @@ fn fact() -> impl Parser<char, Statement, Error = ParseError> + Clone {
 fn rule() -> impl Parser<char, Statement, Error = ParseError> + Clone {
     atom()
         .then_ignore(just(":-").padded())
-        .then(
-            literal()
-                .separated_by(just(',').padded())
-                .at_least(1)
-        )
+        .then(literal().separated_by(just(',').padded()).at_least(1))
         .then_ignore(just('.').padded())
         .map(|(head, body)| Statement::Rule(Rule { head, body }))
         .labelled("rule")
@@ -311,11 +302,7 @@ fn rule() -> impl Parser<char, Statement, Error = ParseError> + Clone {
 fn constraint() -> impl Parser<char, Statement, Error = ParseError> + Clone {
     just(":-")
         .padded()
-        .ignore_then(
-            literal()
-                .separated_by(just(',').padded())
-                .at_least(1)
-        )
+        .ignore_then(literal().separated_by(just(',').padded()).at_least(1))
         .then_ignore(just('.').padded())
         .map(|body| Statement::Constraint(Constraint { body }))
         .labelled("constraint")
@@ -331,7 +318,10 @@ fn prob_fact() -> impl Parser<char, Statement, Error = ParseError> + Clone {
             let prob_str = format!("{}.{}", whole, frac);
             match prob_str.parse::<f64>() {
                 Ok(p) if (0.0..=1.0).contains(&p) => Ok(p),
-                Ok(_) => Err(ParseError::custom(span, "probability must be between 0.0 and 1.0")),
+                Ok(_) => Err(ParseError::custom(
+                    span,
+                    "probability must be between 0.0 and 1.0",
+                )),
                 Err(_) => Err(ParseError::custom(span, "invalid probability")),
             }
         })
@@ -353,11 +343,11 @@ fn const_decl() -> impl Parser<char, Statement, Error = ParseError> + Clone {
                 .or_not()
                 .then(text::int(10))
                 .try_map(|(sign, num_str), span| {
-                    let num: i64 = num_str.parse().map_err(|_| {
-                        ParseError::custom(span, "invalid integer")
-                    })?;
+                    let num: i64 = num_str
+                        .parse()
+                        .map_err(|_| ParseError::custom(span, "invalid integer"))?;
                     Ok(if sign.is_some() { -num } else { num })
-                })
+                }),
         )
         .then_ignore(just('.').padded())
         .map(|(name, value)| {
@@ -373,35 +363,27 @@ fn const_decl() -> impl Parser<char, Statement, Error = ParseError> + Clone {
 fn choice_rule() -> impl Parser<char, Statement, Error = ParseError> + Clone {
     // Optional lower bound - can be integer or identifier (constant name)
     let lower_bound = choice((
-        text::int(10)
-            .try_map(|s: String, span: std::ops::Range<usize>| {
-                s.parse::<i64>()
-                    .map(|n| Term::Constant(Value::Integer(n)))
-                    .map_err(|_| ParseError::custom(span, "invalid integer"))
-            }),
-        lowercase_ident()
-            .map(|s| Term::Constant(Value::Atom(Intern::new(s))))
+        text::int(10).try_map(|s: String, span: std::ops::Range<usize>| {
+            s.parse::<i64>()
+                .map(|n| Term::Constant(Value::Integer(n)))
+                .map_err(|_| ParseError::custom(span, "invalid integer"))
+        }),
+        lowercase_ident().map(|s| Term::Constant(Value::Atom(Intern::new(s)))),
     ))
-        .padded()
-        .or_not();
+    .padded()
+    .or_not();
 
     // Choice element: atom or atom : condition1, condition2
     let choice_element = atom()
         .then(
             just(':')
                 .padded()
-                .ignore_then(
-                    literal()
-                        .separated_by(just(',').padded())
-                        .at_least(1)
-                )
-                .or_not()
+                .ignore_then(literal().separated_by(just(',').padded()).at_least(1))
+                .or_not(),
         )
-        .map(|(atom, condition)| {
-            ChoiceElement {
-                atom,
-                condition: condition.unwrap_or_default(),
-            }
+        .map(|(atom, condition)| ChoiceElement {
+            atom,
+            condition: condition.unwrap_or_default(),
         });
 
     // Elements inside braces, separated by semicolons
@@ -412,26 +394,20 @@ fn choice_rule() -> impl Parser<char, Statement, Error = ParseError> + Clone {
 
     // Optional upper bound - can be integer or identifier (constant name)
     let upper_bound = choice((
-        text::int(10)
-            .try_map(|s: String, span: std::ops::Range<usize>| {
-                s.parse::<i64>()
-                    .map(|n| Term::Constant(Value::Integer(n)))
-                    .map_err(|_| ParseError::custom(span, "invalid integer"))
-            }),
-        lowercase_ident()
-            .map(|s| Term::Constant(Value::Atom(Intern::new(s))))
+        text::int(10).try_map(|s: String, span: std::ops::Range<usize>| {
+            s.parse::<i64>()
+                .map(|n| Term::Constant(Value::Integer(n)))
+                .map_err(|_| ParseError::custom(span, "invalid integer"))
+        }),
+        lowercase_ident().map(|s| Term::Constant(Value::Atom(Intern::new(s)))),
     ))
-        .padded()
-        .or_not();
+    .padded()
+    .or_not();
 
     // Optional body after :-
     let body = just(":-")
         .padded()
-        .ignore_then(
-            literal()
-                .separated_by(just(',').padded())
-                .at_least(1)
-        )
+        .ignore_then(literal().separated_by(just(',').padded()).at_least(1))
         .or_not();
 
     lower_bound
@@ -453,9 +429,9 @@ fn choice_rule() -> impl Parser<char, Statement, Error = ParseError> + Clone {
 /// Parse a statement
 fn statement() -> impl Parser<char, Statement, Error = ParseError> + Clone {
     choice((
-        const_decl(),   // Try #const first (distinctive prefix)
+        const_decl(), // Try #const first (distinctive prefix)
         prob_fact(),
-        choice_rule(),  // Try choice rules (distinctive { prefix)
+        choice_rule(), // Try choice rules (distinctive { prefix)
         constraint(),
         rule(),
         fact(),
@@ -466,7 +442,11 @@ fn statement() -> impl Parser<char, Statement, Error = ParseError> + Clone {
 /// Parse a program
 pub fn program() -> impl Parser<char, Program, Error = ParseError> + Clone {
     statement()
-        .padded_by(comment().or(text::whitespace().at_least(1).ignored()).repeated())
+        .padded_by(
+            comment()
+                .or(text::whitespace().at_least(1).ignored())
+                .repeated(),
+        )
         .repeated()
         .map(|statements| Program { statements })
         .then_ignore(end())
@@ -564,10 +544,7 @@ mod tests {
     fn test_parse_range_both_constants() {
         let result = term().parse("min..max");
         assert!(result.is_ok());
-        let expected = Term::Range(
-            Box::new(atom_term("min")),
-            Box::new(atom_term("max"))
-        );
+        let expected = Term::Range(Box::new(atom_term("min")), Box::new(atom_term("max")));
         assert_eq!(result.unwrap(), expected);
     }
 
@@ -613,21 +590,30 @@ mod tests {
     fn test_parse_uppercase_variable() {
         let result = term().parse("X");
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Term::Variable(Intern::new("X".to_string())));
+        assert_eq!(
+            result.unwrap(),
+            Term::Variable(Intern::new("X".to_string()))
+        );
     }
 
     #[test]
     fn test_parse_multichar_variable() {
         let result = term().parse("Player");
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Term::Variable(Intern::new("Player".to_string())));
+        assert_eq!(
+            result.unwrap(),
+            Term::Variable(Intern::new("Player".to_string()))
+        );
     }
 
     #[test]
     fn test_parse_underscore_variable() {
         let result = term().parse("_tmp");
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Term::Variable(Intern::new("_tmp".to_string())));
+        assert_eq!(
+            result.unwrap(),
+            Term::Variable(Intern::new("_tmp".to_string()))
+        );
     }
 
     // Strings
@@ -796,7 +782,10 @@ mod tests {
         match &program.statements[0] {
             Statement::ProbFact(prob_fact) => {
                 assert_eq!(prob_fact.probability, 0.7);
-                assert_eq!(prob_fact.atom.predicate, Intern::new("treasure".to_string()));
+                assert_eq!(
+                    prob_fact.atom.predicate,
+                    Intern::new("treasure".to_string())
+                );
             }
             _ => panic!("Expected probabilistic fact"),
         }
@@ -875,7 +864,10 @@ mod tests {
                 assert_eq!(choice.upper_bound, None);
                 assert_eq!(choice.elements.len(), 2);
                 assert_eq!(choice.body.len(), 0);
-                assert_eq!(choice.elements[0].atom.predicate, Intern::new("solid".to_string()));
+                assert_eq!(
+                    choice.elements[0].atom.predicate,
+                    Intern::new("solid".to_string())
+                );
                 assert_eq!(choice.elements[0].condition.len(), 0);
             }
             _ => panic!("Expected choice rule"),
@@ -1132,9 +1124,15 @@ mod tests {
         match &program.statements[0] {
             Statement::Fact(fact) => {
                 assert_eq!(fact.atom.terms.len(), 3);
-                assert_eq!(fact.atom.terms[0], Term::Constant(Value::Atom(Intern::new("a".to_string()))));
+                assert_eq!(
+                    fact.atom.terms[0],
+                    Term::Constant(Value::Atom(Intern::new("a".to_string())))
+                );
                 assert_eq!(fact.atom.terms[1], range(1, 10));
-                assert_eq!(fact.atom.terms[2], Term::Constant(Value::Atom(Intern::new("b".to_string()))));
+                assert_eq!(
+                    fact.atom.terms[2],
+                    Term::Constant(Value::Atom(Intern::new("b".to_string())))
+                );
             }
             _ => panic!("Expected fact"),
         }
@@ -1230,7 +1228,7 @@ mod tests {
                             _ => panic!("Expected variable X"),
                         }
                         match &atom.terms[1] {
-                            Term::Constant(Value::Integer(3)) => {},
+                            Term::Constant(Value::Integer(3)) => {}
                             _ => panic!("Expected integer 3, got {:?}", atom.terms[1]),
                         }
                     }
@@ -1331,14 +1329,12 @@ mod tests {
             assert!(result.is_ok(), "Failed to parse operator: {}", op);
 
             match &result.unwrap().statements[0] {
-                Statement::Rule(rule) => {
-                    match &rule.body[0] {
-                        Literal::Positive(atom) => {
-                            assert_eq!(atom.predicate, Intern::new(op.to_string()));
-                        }
-                        _ => panic!("Expected positive literal"),
+                Statement::Rule(rule) => match &rule.body[0] {
+                    Literal::Positive(atom) => {
+                        assert_eq!(atom.predicate, Intern::new(op.to_string()));
                     }
-                }
+                    _ => panic!("Expected positive literal"),
+                },
                 _ => panic!("Expected rule"),
             }
         }
@@ -1415,7 +1411,10 @@ mod tests {
                     Some(Term::Constant(Value::Atom(name))) => {
                         assert_eq!(*name, Intern::new("min".to_string()));
                     }
-                    _ => panic!("Expected atom constant for lower bound, got {:?}", choice.lower_bound),
+                    _ => panic!(
+                        "Expected atom constant for lower bound, got {:?}",
+                        choice.lower_bound
+                    ),
                 }
                 assert!(choice.upper_bound.is_none());
             }
@@ -1437,7 +1436,10 @@ mod tests {
                     Some(Term::Constant(Value::Atom(name))) => {
                         assert_eq!(*name, Intern::new("max".to_string()));
                     }
-                    _ => panic!("Expected atom constant for upper bound, got {:?}", choice.upper_bound),
+                    _ => panic!(
+                        "Expected atom constant for upper bound, got {:?}",
+                        choice.upper_bound
+                    ),
                 }
             }
             _ => panic!("Expected choice rule"),
@@ -1481,8 +1483,11 @@ mod tests {
         match &result.unwrap().statements[0] {
             Statement::ChoiceRule(choice) => {
                 match &choice.lower_bound {
-                    Some(Term::Constant(Value::Integer(2))) => {},
-                    _ => panic!("Expected integer 2 for lower bound, got {:?}", choice.lower_bound),
+                    Some(Term::Constant(Value::Integer(2))) => {}
+                    _ => panic!(
+                        "Expected integer 2 for lower bound, got {:?}",
+                        choice.lower_bound
+                    ),
                 }
                 match &choice.upper_bound {
                     Some(Term::Constant(Value::Atom(name))) => {
@@ -1495,4 +1500,3 @@ mod tests {
         }
     }
 }
-

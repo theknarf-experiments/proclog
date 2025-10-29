@@ -6,8 +6,8 @@
 
 #[cfg(test)]
 mod choice_constant_bounds_tests {
-    use crate::parser::parse_program;
     use crate::asp::asp_evaluation;
+    use crate::parser::parse_program;
 
     #[test]
     fn test_constant_lower_bound() {
@@ -29,10 +29,16 @@ mod choice_constant_bounds_tests {
 
         // All answer sets should have at least 2 selected items
         for answer_set in &answer_sets {
-            let selected_count = answer_set.atoms.iter()
+            let selected_count = answer_set
+                .atoms
+                .iter()
                 .filter(|atom| atom.predicate.as_ref() == "selected")
                 .count();
-            assert!(selected_count >= 2, "Should have at least 2 selected items, got {}", selected_count);
+            assert!(
+                selected_count >= 2,
+                "Should have at least 2 selected items, got {}",
+                selected_count
+            );
         }
     }
 
@@ -56,10 +62,16 @@ mod choice_constant_bounds_tests {
 
         // All answer sets should have at most 2 selected items
         for answer_set in &answer_sets {
-            let selected_count = answer_set.atoms.iter()
+            let selected_count = answer_set
+                .atoms
+                .iter()
                 .filter(|atom| atom.predicate.as_ref() == "selected")
                 .count();
-            assert!(selected_count <= 2, "Should have at most 2 selected items, got {}", selected_count);
+            assert!(
+                selected_count <= 2,
+                "Should have at most 2 selected items, got {}",
+                selected_count
+            );
         }
     }
 
@@ -84,11 +96,16 @@ mod choice_constant_bounds_tests {
 
         // All answer sets should have between 1 and 2 chosen items
         for answer_set in &answer_sets {
-            let chosen_count = answer_set.atoms.iter()
+            let chosen_count = answer_set
+                .atoms
+                .iter()
                 .filter(|atom| atom.predicate.as_ref() == "chosen")
                 .count();
-            assert!(chosen_count >= 1 && chosen_count <= 2,
-                "Should have 1-2 chosen items, got {}", chosen_count);
+            assert!(
+                chosen_count >= 1 && chosen_count <= 2,
+                "Should have 1-2 chosen items, got {}",
+                chosen_count
+            );
         }
 
         // Should have exactly 6 answer sets: C(3,1) + C(3,2) = 3 + 3 = 6
@@ -114,11 +131,16 @@ mod choice_constant_bounds_tests {
         assert!(answer_sets.len() > 0, "Should generate answer sets");
 
         for answer_set in &answer_sets {
-            let weapon_count = answer_set.atoms.iter()
+            let weapon_count = answer_set
+                .atoms
+                .iter()
                 .filter(|atom| atom.predicate.as_ref() == "has")
                 .count();
-            assert!(weapon_count >= 1 && weapon_count <= 2,
-                "Should have 1-2 weapons, got {}", weapon_count);
+            assert!(
+                weapon_count >= 1 && weapon_count <= 2,
+                "Should have 1-2 weapons, got {}",
+                weapon_count
+            );
         }
 
         // Should have 6 answer sets: C(3,1) + C(3,2) = 3 + 3 = 6
@@ -142,10 +164,16 @@ mod choice_constant_bounds_tests {
 
         // Should have exactly 2 colors in each answer set
         for answer_set in &answer_sets {
-            let color_count = answer_set.atoms.iter()
+            let color_count = answer_set
+                .atoms
+                .iter()
                 .filter(|atom| atom.predicate.as_ref() == "pick")
                 .count();
-            assert_eq!(color_count, 2, "Should have exactly 2 colors, got {}", color_count);
+            assert_eq!(
+                color_count, 2,
+                "Should have exactly 2 colors, got {}",
+                color_count
+            );
         }
 
         // Should have C(3,2) = 3 answer sets
@@ -171,18 +199,22 @@ mod choice_constant_bounds_tests {
 
         // Each player should have exactly 1 weapon
         for answer_set in &answer_sets {
-            let alice_weapons = answer_set.atoms.iter()
+            let alice_weapons = answer_set
+                .atoms
+                .iter()
                 .filter(|atom| {
-                    atom.predicate.as_ref() == "has_weapon" &&
-                    atom.terms.len() >= 1 &&
-                    format!("{:?}", atom.terms[0]).contains("alice")
+                    atom.predicate.as_ref() == "has_weapon"
+                        && atom.terms.len() >= 1
+                        && format!("{:?}", atom.terms[0]).contains("alice")
                 })
                 .count();
-            let bob_weapons = answer_set.atoms.iter()
+            let bob_weapons = answer_set
+                .atoms
+                .iter()
                 .filter(|atom| {
-                    atom.predicate.as_ref() == "has_weapon" &&
-                    atom.terms.len() >= 1 &&
-                    format!("{:?}", atom.terms[0]).contains("bob")
+                    atom.predicate.as_ref() == "has_weapon"
+                        && atom.terms.len() >= 1
+                        && format!("{:?}", atom.terms[0]).contains("bob")
                 })
                 .count();
 

@@ -1,9 +1,9 @@
 // Tests for multiple independent choice rules (cartesian product behavior)
 
-use crate::parser::parse_program;
 use crate::asp::asp_evaluation;
-use internment::Intern;
 use crate::ast::{Term, Value};
+use crate::parser::parse_program;
+use internment::Intern;
 
 #[cfg(test)]
 mod multiple_choice_tests {
@@ -28,7 +28,11 @@ mod multiple_choice_tests {
         let answer_sets = asp_evaluation(&program);
 
         // Expected: 2 colors × 2 sizes = 4 answer sets
-        assert_eq!(answer_sets.len(), 4, "Should have 4 answer sets (2×2 cartesian product)");
+        assert_eq!(
+            answer_sets.len(),
+            4,
+            "Should have 4 answer sets (2×2 cartesian product)"
+        );
 
         // Verify all combinations exist
         let combinations = [
@@ -41,16 +45,26 @@ mod multiple_choice_tests {
         for (expected_color, expected_size) in &combinations {
             let found = answer_sets.iter().any(|as_set| {
                 let has_color = as_set.atoms.iter().any(|a| {
-                    a.predicate == Intern::new("selected_color".to_string()) &&
-                    a.terms.get(0) == Some(&Term::Constant(Value::Atom(Intern::new(expected_color.to_string()))))
+                    a.predicate == Intern::new("selected_color".to_string())
+                        && a.terms.get(0)
+                            == Some(&Term::Constant(Value::Atom(Intern::new(
+                                expected_color.to_string(),
+                            ))))
                 });
                 let has_size = as_set.atoms.iter().any(|a| {
-                    a.predicate == Intern::new("selected_size".to_string()) &&
-                    a.terms.get(0) == Some(&Term::Constant(Value::Atom(Intern::new(expected_size.to_string()))))
+                    a.predicate == Intern::new("selected_size".to_string())
+                        && a.terms.get(0)
+                            == Some(&Term::Constant(Value::Atom(Intern::new(
+                                expected_size.to_string(),
+                            ))))
                 });
                 has_color && has_size
             });
-            assert!(found, "Should have combination ({}, {})", expected_color, expected_size);
+            assert!(
+                found,
+                "Should have combination ({}, {})",
+                expected_color, expected_size
+            );
         }
     }
 
@@ -80,19 +94,34 @@ mod multiple_choice_tests {
 
         // Each answer set should have exactly 1 of each choice
         for as_set in &answer_sets {
-            let color_count = as_set.atoms.iter()
+            let color_count = as_set
+                .atoms
+                .iter()
                 .filter(|a| a.predicate == Intern::new("c".to_string()))
                 .count();
-            let size_count = as_set.atoms.iter()
+            let size_count = as_set
+                .atoms
+                .iter()
                 .filter(|a| a.predicate == Intern::new("s".to_string()))
                 .count();
-            let material_count = as_set.atoms.iter()
+            let material_count = as_set
+                .atoms
+                .iter()
                 .filter(|a| a.predicate == Intern::new("m".to_string()))
                 .count();
 
-            assert_eq!(color_count, 1, "Each answer set should select exactly 1 color");
-            assert_eq!(size_count, 1, "Each answer set should select exactly 1 size");
-            assert_eq!(material_count, 1, "Each answer set should select exactly 1 material");
+            assert_eq!(
+                color_count, 1,
+                "Each answer set should select exactly 1 color"
+            );
+            assert_eq!(
+                size_count, 1,
+                "Each answer set should select exactly 1 size"
+            );
+            assert_eq!(
+                material_count, 1,
+                "Each answer set should select exactly 1 material"
+            );
         }
     }
 
@@ -175,12 +204,16 @@ mod multiple_choice_tests {
         // Verify red+large doesn't exist
         let has_red_large = answer_sets.iter().any(|as_set| {
             let has_red = as_set.atoms.iter().any(|a| {
-                a.predicate == Intern::new("selected_color".to_string()) &&
-                a.terms.get(0) == Some(&Term::Constant(Value::Atom(Intern::new("red".to_string()))))
+                a.predicate == Intern::new("selected_color".to_string())
+                    && a.terms.get(0)
+                        == Some(&Term::Constant(Value::Atom(Intern::new("red".to_string()))))
             });
             let has_large = as_set.atoms.iter().any(|a| {
-                a.predicate == Intern::new("selected_size".to_string()) &&
-                a.terms.get(0) == Some(&Term::Constant(Value::Atom(Intern::new("large".to_string()))))
+                a.predicate == Intern::new("selected_size".to_string())
+                    && a.terms.get(0)
+                        == Some(&Term::Constant(Value::Atom(Intern::new(
+                            "large".to_string(),
+                        ))))
             });
             has_red && has_large
         });
@@ -221,10 +254,14 @@ mod multiple_choice_tests {
 
         // Verify semantic correctness: room_count is derived correctly
         for as_set in &answer_sets {
-            let rooms: Vec<_> = as_set.atoms.iter()
+            let rooms: Vec<_> = as_set
+                .atoms
+                .iter()
                 .filter(|a| a.predicate == Intern::new("has_room".to_string()))
                 .collect();
-            let room_count: Option<i64> = as_set.atoms.iter()
+            let room_count: Option<i64> = as_set
+                .atoms
+                .iter()
                 .filter(|a| a.predicate == Intern::new("room_count".to_string()))
                 .filter_map(|a| {
                     if let Some(Term::Constant(Value::Integer(n))) = a.terms.get(0) {
@@ -235,7 +272,11 @@ mod multiple_choice_tests {
                 })
                 .next();
 
-            assert_eq!(room_count, Some(rooms.len() as i64), "room_count should match actual room count");
+            assert_eq!(
+                room_count,
+                Some(rooms.len() as i64),
+                "room_count should match actual room count"
+            );
         }
     }
 
@@ -283,10 +324,13 @@ mod multiple_choice_tests {
 
         // Verify one has just selected(a) with no tags
         let has_empty_tags = answer_sets.iter().any(|as_set| {
-            let has_selected = as_set.atoms.iter().any(|a| {
-                a.predicate == Intern::new("selected".to_string())
-            });
-            let tag_count = as_set.atoms.iter()
+            let has_selected = as_set
+                .atoms
+                .iter()
+                .any(|a| a.predicate == Intern::new("selected".to_string()));
+            let tag_count = as_set
+                .atoms
+                .iter()
                 .filter(|a| a.predicate == Intern::new("has_tag".to_string()))
                 .count();
             has_selected && tag_count == 0

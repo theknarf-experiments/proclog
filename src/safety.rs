@@ -1,4 +1,4 @@
-use crate::ast::{Rule, Literal, Term, Atom, Symbol};
+use crate::ast::{Atom, Literal, Rule, Symbol, Term};
 use std::collections::HashSet;
 
 /// Error indicating a rule is unsafe
@@ -125,7 +125,7 @@ fn format_rule(rule: &Rule) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{Value};
+    use crate::ast::Value;
     use internment::Intern;
 
     // Helper functions

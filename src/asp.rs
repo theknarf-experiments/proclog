@@ -1,8 +1,8 @@
-use crate::ast::{Program, Statement, Rule, Constraint, ChoiceRule, Atom, Term, Value};
-use crate::database::FactDatabase;
+use crate::ast::{Atom, ChoiceRule, Constraint, Program, Rule, Statement, Term, Value};
 use crate::constants::ConstantEnv;
-use crate::grounding::ground_choice_rule;
+use crate::database::FactDatabase;
 use crate::evaluation::stratified_evaluation_with_constraints;
+use crate::grounding::ground_choice_rule;
 use std::collections::HashSet;
 
 /// An answer set is a stable model - a set of ground atoms
@@ -30,7 +30,7 @@ fn resolve_bound(bound: &Term, const_env: &ConstantEnv) -> Option<i64> {
 fn generate_subsets<T: Clone>(items: &[T], min_size: usize, max_size: usize) -> Vec<Vec<T>> {
     let mut result = Vec::new();
     let n = items.len();
-    
+
     // For small sets, enumerate all subsets via bit patterns
     if n <= 20 {
         let total: u32 = 1 << n;
@@ -51,7 +51,7 @@ fn generate_subsets<T: Clone>(items: &[T], min_size: usize, max_size: usize) -> 
         // In practice, ASP solvers use sophisticated techniques here
         generate_subsets_recursive(items, min_size, max_size, 0, &mut vec![], &mut result);
     }
-    
+
     result
 }
 
@@ -61,7 +61,7 @@ fn generate_subsets_recursive<T: Clone>(
     max_size: usize,
     start: usize,
     current: &mut Vec<T>,
-    result: &mut Vec<Vec<T>>
+    result: &mut Vec<Vec<T>>,
 ) {
     // Pruning: if we can't possibly reach min_size, stop
     let remaining = items.len() - start;
@@ -141,7 +141,7 @@ pub fn asp_evaluation(program: &Program) -> Vec<AnswerSet> {
     let mut rules = Vec::new();
     let mut constraints = Vec::new();
     let mut choice_rules = Vec::new();
-    
+
     for statement in &program.statements {
         match statement {
             Statement::Fact(fact) => {
@@ -165,7 +165,7 @@ pub fn asp_evaluation(program: &Program) -> Vec<AnswerSet> {
             }
         }
     }
-    
+
     // IMPORTANT: Evaluate Datalog rules FIRST to derive all facts
     // These derived facts are needed for grounding choice rule conditions
     let derived_db = if rules.is_empty() {
@@ -204,17 +204,22 @@ pub fn asp_evaluation(program: &Program) -> Vec<AnswerSet> {
         // For each group (body substitution), create an independent choice
         for group in groups {
             // Remove duplicates within this group
-            let unique_atoms: Vec<Atom> = group.into_iter()
+            let unique_atoms: Vec<Atom> = group
+                .into_iter()
                 .collect::<HashSet<_>>()
                 .into_iter()
                 .collect();
 
             // Determine bounds for this specific choice rule
             // Resolve bounds from Terms to i64 values, substituting constant names
-            let min_size = choice.lower_bound.as_ref()
+            let min_size = choice
+                .lower_bound
+                .as_ref()
                 .and_then(|term| resolve_bound(term, &const_env))
                 .unwrap_or(0) as usize;
-            let max_size = choice.upper_bound.as_ref()
+            let max_size = choice
+                .upper_bound
+                .as_ref()
                 .and_then(|term| resolve_bound(term, &const_env))
                 .map(|u| u as usize)
                 .unwrap_or(unique_atoms.len());
@@ -227,9 +232,9 @@ pub fn asp_evaluation(program: &Program) -> Vec<AnswerSet> {
 
     // Generate cartesian product of all choice rule subsets
     let candidates = cartesian_product_choice_subsets(&choice_rule_subsets);
-    
+
     let mut answer_sets = Vec::new();
-    
+
     // Test each candidate
     for candidate in candidates {
         // Create a database with base facts + chosen atoms
@@ -237,17 +242,17 @@ pub fn asp_evaluation(program: &Program) -> Vec<AnswerSet> {
         for atom in &candidate {
             test_db.insert(atom.clone());
         }
-        
+
         // Evaluate with rules and constraints
         let result = stratified_evaluation_with_constraints(&rules, &constraints, test_db);
-        
+
         if let Ok(final_db) = result {
             // This is a valid answer set
             let atoms: HashSet<Atom> = final_db.all_facts().into_iter().cloned().collect();
             answer_sets.push(AnswerSet { atoms });
         }
     }
-    
+
     answer_sets
 }
 
@@ -301,7 +306,9 @@ mod tests {
 
         // Verify at least one answer set has the expected structure
         let has_all_items = answer_sets.iter().any(|as_set| {
-            let item_count = as_set.atoms.iter()
+            let item_count = as_set
+                .atoms
+                .iter()
                 .filter(|a| a.predicate == Intern::new("item".to_string()))
                 .count();
             item_count == 3 // Should have exactly 3 items
@@ -327,7 +334,9 @@ mod tests {
 
         // Verify items are generated from constant
         for as_set in &answer_sets {
-            let item_count = as_set.atoms.iter()
+            let item_count = as_set
+                .atoms
+                .iter()
                 .filter(|a| a.predicate == Intern::new("item".to_string()))
                 .count();
             assert_eq!(item_count, 3, "Should have 3 items from range");
@@ -360,7 +369,9 @@ mod tests {
 
         // Verify equipment facts are derived
         for as_set in &answer_sets {
-            let equipment_count = as_set.atoms.iter()
+            let equipment_count = as_set
+                .atoms
+                .iter()
                 .filter(|a| a.predicate == Intern::new("equipment".to_string()))
                 .count();
             assert_eq!(equipment_count, 3, "Should have 3 equipment facts");
@@ -391,9 +402,9 @@ mod tests {
         // Verify path derivation
         let has_transitive = answer_sets.iter().any(|as_set| {
             as_set.atoms.iter().any(|a| {
-                a.predicate == Intern::new("path".to_string()) &&
-                format!("{:?}", a).contains("a") &&
-                format!("{:?}", a).contains("c")
+                a.predicate == Intern::new("path".to_string())
+                    && format!("{:?}", a).contains("a")
+                    && format!("{:?}", a).contains("c")
             })
         });
         assert!(has_transitive, "Should derive transitive path a->c");
@@ -422,7 +433,9 @@ mod tests {
 
         // Verify no empty answer sets
         for as_set in &answer_sets {
-            let selected_count = as_set.atoms.iter()
+            let selected_count = as_set
+                .atoms
+                .iter()
                 .filter(|a| a.predicate == Intern::new("selected".to_string()))
                 .count();
             assert!(selected_count > 0, "Should not have empty selections");
@@ -479,15 +492,22 @@ mod tests {
 
         // Verify grid cells are generated
         for as_set in &answer_sets {
-            let cell_count = as_set.atoms.iter()
+            let cell_count = as_set
+                .atoms
+                .iter()
                 .filter(|a| a.predicate == Intern::new("cell".to_string()))
                 .count();
             assert_eq!(cell_count, 9, "Should have 9 cells (3x3 grid)");
 
-            let solid_count = as_set.atoms.iter()
+            let solid_count = as_set
+                .atoms
+                .iter()
                 .filter(|a| a.predicate == Intern::new("solid".to_string()))
                 .count();
-            assert!(solid_count >= 2 && solid_count <= 4, "Should have 2-4 solid cells");
+            assert!(
+                solid_count >= 2 && solid_count <= 4,
+                "Should have 2-4 solid cells"
+            );
         }
     }
 
@@ -518,10 +538,14 @@ mod tests {
 
         // Verify free positions are correctly derived
         for as_set in &answer_sets {
-            let occupied_count = as_set.atoms.iter()
+            let occupied_count = as_set
+                .atoms
+                .iter()
                 .filter(|a| a.predicate == Intern::new("occupied".to_string()))
                 .count();
-            let free_count = as_set.atoms.iter()
+            let free_count = as_set
+                .atoms
+                .iter()
                 .filter(|a| a.predicate == Intern::new("free".to_string()))
                 .count();
 
@@ -554,7 +578,9 @@ mod tests {
 
         // Verify cell derivation
         for as_set in &answer_sets {
-            let cell_count = as_set.atoms.iter()
+            let cell_count = as_set
+                .atoms
+                .iter()
                 .filter(|a| a.predicate == Intern::new("cell".to_string()))
                 .count();
             assert_eq!(cell_count, 4, "Should derive 4 cells from 2x2 grid");
@@ -657,7 +683,9 @@ mod tests {
         // So only 1 answer set: both selected
         assert_eq!(answer_sets.len(), 1);
 
-        let selected_count = answer_sets[0].atoms.iter()
+        let selected_count = answer_sets[0]
+            .atoms
+            .iter()
             .filter(|a| a.predicate == Intern::new("selected".to_string()))
             .count();
         assert_eq!(selected_count, 2);
@@ -696,8 +724,11 @@ mod tests {
         // Verify the single item exists
         let has_item_5 = answer_sets.iter().any(|as_set| {
             as_set.atoms.iter().any(|a| {
-                a.predicate == Intern::new("item".to_string()) &&
-                matches!(a.terms.get(0), Some(crate::ast::Term::Constant(crate::ast::Value::Integer(5))))
+                a.predicate == Intern::new("item".to_string())
+                    && matches!(
+                        a.terms.get(0),
+                        Some(crate::ast::Term::Constant(crate::ast::Value::Integer(5)))
+                    )
             })
         });
         assert!(has_item_5);
@@ -718,7 +749,9 @@ mod tests {
         // Should generate values: -2, -1, 0, 1
         assert_eq!(answer_sets.len(), 1);
 
-        let value_count = answer_sets[0].atoms.iter()
+        let value_count = answer_sets[0]
+            .atoms
+            .iter()
             .filter(|a| a.predicate == Intern::new("value".to_string()))
             .count();
         assert_eq!(value_count, 4);
@@ -744,11 +777,15 @@ mod tests {
         // Verify 'a' is never selected
         let a_selected = answer_sets.iter().any(|as_set| {
             as_set.atoms.iter().any(|atom| {
-                atom.predicate == Intern::new("selected".to_string()) &&
-                atom.terms.get(0) == Some(&Term::Constant(Value::Atom(Intern::new("a".to_string()))))
+                atom.predicate == Intern::new("selected".to_string())
+                    && atom.terms.get(0)
+                        == Some(&Term::Constant(Value::Atom(Intern::new("a".to_string()))))
             })
         });
-        assert!(!a_selected, "Item 'a' should never be selected (it's forbidden)");
+        assert!(
+            !a_selected,
+            "Item 'a' should never be selected (it's forbidden)"
+        );
     }
 
     #[test]
@@ -786,9 +823,10 @@ mod tests {
 
         // No choice rules, so one answer set with just the base facts
         assert_eq!(answer_sets.len(), 1);
-        assert!(answer_sets[0].atoms.iter().any(|a|
-            a.predicate == Intern::new("item".to_string())
-        ));
+        assert!(answer_sets[0]
+            .atoms
+            .iter()
+            .any(|a| a.predicate == Intern::new("item".to_string())));
     }
 
     #[test]
@@ -836,10 +874,14 @@ mod tests {
 
         // Verify cascading: every answer set with has_room(X) also has needs_door(X)
         for as_set in &answer_sets {
-            let rooms: Vec<_> = as_set.atoms.iter()
+            let rooms: Vec<_> = as_set
+                .atoms
+                .iter()
                 .filter(|a| a.predicate == Intern::new("has_room".to_string()))
                 .collect();
-            let needs: Vec<_> = as_set.atoms.iter()
+            let needs: Vec<_> = as_set
+                .atoms
+                .iter()
                 .filter(|a| a.predicate == Intern::new("needs_door".to_string()))
                 .collect();
 
@@ -871,13 +913,20 @@ mod tests {
 
         // Verify mutual exclusion
         let has_both_bonuses = answer_sets.iter().any(|as_set| {
-            let has_attack = as_set.atoms.iter().any(|a|
-                a.predicate == Intern::new("attack_bonus".to_string()));
-            let has_defense = as_set.atoms.iter().any(|a|
-                a.predicate == Intern::new("defense_bonus".to_string()));
+            let has_attack = as_set
+                .atoms
+                .iter()
+                .any(|a| a.predicate == Intern::new("attack_bonus".to_string()));
+            let has_defense = as_set
+                .atoms
+                .iter()
+                .any(|a| a.predicate == Intern::new("defense_bonus".to_string()));
             has_attack && has_defense
         });
-        assert!(!has_both_bonuses, "Should not have both bonuses in same answer set");
+        assert!(
+            !has_both_bonuses,
+            "Should not have both bonuses in same answer set"
+        );
     }
 
     #[test]
@@ -910,12 +959,17 @@ mod tests {
         assert_eq!(answer_sets.len(), 512);
 
         // Verify semantic correctness: if a node is isolated, there's no path from 'a' to it
-        for as_set in answer_sets.iter().take(10) {  // Sample some answer sets
-            let isolated: Vec<_> = as_set.atoms.iter()
+        for as_set in answer_sets.iter().take(10) {
+            // Sample some answer sets
+            let isolated: Vec<_> = as_set
+                .atoms
+                .iter()
                 .filter(|atom| atom.predicate == Intern::new("isolated".to_string()))
                 .collect();
 
-            let reachable: Vec<_> = as_set.atoms.iter()
+            let reachable: Vec<_> = as_set
+                .atoms
+                .iter()
                 .filter(|atom| atom.predicate == Intern::new("reach".to_string()))
                 .filter(|atom| {
                     if let Some(Term::Constant(Value::Atom(from))) = atom.terms.get(0) {
@@ -936,7 +990,11 @@ mod tests {
                             false
                         }
                     });
-                    assert!(!is_reachable, "Isolated node {:?} should not be reachable from 'a'", iso_node);
+                    assert!(
+                        !is_reachable,
+                        "Isolated node {:?} should not be reachable from 'a'",
+                        iso_node
+                    );
                 }
             }
         }
@@ -968,12 +1026,16 @@ mod tests {
         // Verify the forbidden combination doesn't exist
         let has_red_large = answer_sets.iter().any(|as_set| {
             let has_red = as_set.atoms.iter().any(|a| {
-                a.predicate == Intern::new("selected_color".to_string()) &&
-                a.terms.get(0) == Some(&Term::Constant(Value::Atom(Intern::new("red".to_string()))))
+                a.predicate == Intern::new("selected_color".to_string())
+                    && a.terms.get(0)
+                        == Some(&Term::Constant(Value::Atom(Intern::new("red".to_string()))))
             });
             let has_large = as_set.atoms.iter().any(|a| {
-                a.predicate == Intern::new("selected_size".to_string()) &&
-                a.terms.get(0) == Some(&Term::Constant(Value::Atom(Intern::new("large".to_string()))))
+                a.predicate == Intern::new("selected_size".to_string())
+                    && a.terms.get(0)
+                        == Some(&Term::Constant(Value::Atom(Intern::new(
+                            "large".to_string(),
+                        ))))
             });
             has_red && has_large
         });
@@ -1002,7 +1064,9 @@ mod tests {
 
         // Verify each answer set has exactly 2 selected cells
         for as_set in &answer_sets {
-            let selected_count = as_set.atoms.iter()
+            let selected_count = as_set
+                .atoms
+                .iter()
                 .filter(|a| a.predicate == Intern::new("selected".to_string()))
                 .count();
             assert_eq!(selected_count, 2);
@@ -1038,8 +1102,11 @@ mod tests {
         // Verify every answer set has at least one player with sword
         for as_set in &answer_sets {
             let someone_has_sword = as_set.atoms.iter().any(|a| {
-                a.predicate == Intern::new("has_weapon".to_string()) &&
-                a.terms.get(1) == Some(&Term::Constant(Value::Atom(Intern::new("sword".to_string()))))
+                a.predicate == Intern::new("has_weapon".to_string())
+                    && a.terms.get(1)
+                        == Some(&Term::Constant(Value::Atom(Intern::new(
+                            "sword".to_string(),
+                        ))))
             });
             assert!(someone_has_sword, "At least one player must have sword");
         }
@@ -1087,7 +1154,10 @@ mod tests {
 
         // Verify the chain worked: if selected, all levels should exist
         let has_selection = answer_sets.iter().any(|as_set| {
-            as_set.atoms.iter().any(|a| a.predicate == Intern::new("selected".to_string()))
+            as_set
+                .atoms
+                .iter()
+                .any(|a| a.predicate == Intern::new("selected".to_string()))
         });
         assert!(has_selection);
     }
@@ -1153,17 +1223,22 @@ mod tests {
         //   - room(1,3): invalid (not connected)
         //   - room(1,2,3): valid (all connected)
         // Total valid: 1 + 2 = 3 answer sets
-        assert!(answer_sets.len() >= 2, "Should have at least 2 valid configurations");
+        assert!(
+            answer_sets.len() >= 2,
+            "Should have at least 2 valid configurations"
+        );
 
         // Verify semantic correctness: if room 1 exists, all rooms should be connected
         for as_set in &answer_sets {
             let has_room_1 = as_set.atoms.iter().any(|a| {
-                a.predicate == Intern::new("room".to_string()) &&
-                a.terms.get(0) == Some(&Term::Constant(Value::Integer(1)))
+                a.predicate == Intern::new("room".to_string())
+                    && a.terms.get(0) == Some(&Term::Constant(Value::Integer(1)))
             });
 
             if has_room_1 {
-                let rooms: Vec<i64> = as_set.atoms.iter()
+                let rooms: Vec<i64> = as_set
+                    .atoms
+                    .iter()
                     .filter(|a| a.predicate == Intern::new("room".to_string()))
                     .filter_map(|a| {
                         if let Some(Term::Constant(Value::Integer(x))) = a.terms.get(0) {
@@ -1174,7 +1249,9 @@ mod tests {
                     })
                     .collect();
 
-                let connected: Vec<i64> = as_set.atoms.iter()
+                let connected: Vec<i64> = as_set
+                    .atoms
+                    .iter()
                     .filter(|a| a.predicate == Intern::new("connected".to_string()))
                     .filter_map(|a| {
                         if let Some(Term::Constant(Value::Integer(x))) = a.terms.get(0) {
@@ -1187,7 +1264,11 @@ mod tests {
 
                 // All rooms should be in connected list
                 for room in rooms {
-                    assert!(connected.contains(&room), "Room {} should be connected", room);
+                    assert!(
+                        connected.contains(&room),
+                        "Room {} should be connected",
+                        room
+                    );
                 }
             }
         }
@@ -1236,14 +1317,20 @@ mod tests {
 
         // Verify we have empty set and full set
         let has_empty = answer_sets.iter().any(|as_set| {
-            as_set.atoms.iter()
+            as_set
+                .atoms
+                .iter()
                 .filter(|a| a.predicate == Intern::new("selected".to_string()))
-                .count() == 0
+                .count()
+                == 0
         });
         let has_full = answer_sets.iter().any(|as_set| {
-            as_set.atoms.iter()
+            as_set
+                .atoms
+                .iter()
                 .filter(|a| a.predicate == Intern::new("selected".to_string()))
-                .count() == 4
+                .count()
+                == 4
         });
 
         assert!(has_empty, "Should include empty selection");
@@ -1286,18 +1373,22 @@ mod tests {
 
         // Verify semantic correctness: can only craft if material is processed
         for as_set in &answer_sets {
-            let crafted: Vec<_> = as_set.atoms.iter()
+            let crafted: Vec<_> = as_set
+                .atoms
+                .iter()
                 .filter(|a| a.predicate == Intern::new("craft".to_string()))
                 .collect();
-            let processed_mats: Vec<_> = as_set.atoms.iter()
+            let processed_mats: Vec<_> = as_set
+                .atoms
+                .iter()
                 .filter(|a| a.predicate == Intern::new("processed".to_string()))
                 .collect();
 
             // Every crafted material must be in processed list
             for craft_atom in crafted {
-                let is_processed = processed_mats.iter().any(|p| {
-                    p.terms.get(0) == craft_atom.terms.get(0)
-                });
+                let is_processed = processed_mats
+                    .iter()
+                    .any(|p| p.terms.get(0) == craft_atom.terms.get(0));
                 assert!(is_processed, "Can only craft processed materials");
             }
         }
@@ -1340,8 +1431,10 @@ mod tests {
 
         // Verify no answer set has complete=true
         for as_set in &answer_sets {
-            let is_complete = as_set.atoms.iter().any(|a|
-                a.predicate == Intern::new("complete".to_string()));
+            let is_complete = as_set
+                .atoms
+                .iter()
+                .any(|a| a.predicate == Intern::new("complete".to_string()));
             assert!(!is_complete, "Complete cycles should be eliminated");
         }
     }
@@ -1369,7 +1462,9 @@ mod tests {
 
         // Verify each answer set has exactly 2 choices (one per entity)
         for as_set in &answer_sets {
-            let choice_count = as_set.atoms.iter()
+            let choice_count = as_set
+                .atoms
+                .iter()
                 .filter(|a| a.predicate == Intern::new("choice".to_string()))
                 .count();
             assert_eq!(choice_count, 2, "Each answer set should have 2 choices");
@@ -1398,7 +1493,9 @@ mod tests {
 
         // Verify each has 3 choices
         for as_set in &answer_sets {
-            let choice_count = as_set.atoms.iter()
+            let choice_count = as_set
+                .atoms
+                .iter()
                 .filter(|a| a.predicate == Intern::new("choice".to_string()))
                 .count();
             assert_eq!(choice_count, 3);
@@ -1451,8 +1548,11 @@ mod tests {
         // Verify constraint: at least one has sword
         for as_set in &answer_sets {
             let someone_has_sword = as_set.atoms.iter().any(|a| {
-                a.predicate == Intern::new("has".to_string()) &&
-                a.terms.get(1) == Some(&Term::Constant(Value::Atom(Intern::new("sword".to_string()))))
+                a.predicate == Intern::new("has".to_string())
+                    && a.terms.get(1)
+                        == Some(&Term::Constant(Value::Atom(Intern::new(
+                            "sword".to_string(),
+                        ))))
             });
             assert!(someone_has_sword);
         }
@@ -1530,10 +1630,15 @@ mod tests {
 
         // Verify each answer set has exactly 2 choices
         for as_set in &answer_sets {
-            let choice_count = as_set.atoms.iter()
+            let choice_count = as_set
+                .atoms
+                .iter()
                 .filter(|a| a.predicate == Intern::new("choice".to_string()))
                 .count();
-            assert_eq!(choice_count, 2, "Should have 2 choices (one per special person)");
+            assert_eq!(
+                choice_count, 2,
+                "Should have 2 choices (one per special person)"
+            );
         }
     }
 }

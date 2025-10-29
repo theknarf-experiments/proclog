@@ -1,6 +1,6 @@
-use crate::ast::{Rule, Literal, Symbol, Atom};
-use std::collections::{HashMap, HashSet};
+use crate::ast::{Atom, Literal, Rule, Symbol};
 use internment::Intern;
+use std::collections::{HashMap, HashSet};
 
 /// Result of stratification analysis
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,8 +23,8 @@ pub enum StratificationError {
 /// Dependency between predicates
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DependencyType {
-    Positive,  // p depends positively on q
-    Negative,  // p depends negatively on q (through negation)
+    Positive, // p depends positively on q
+    Negative, // p depends negatively on q (through negation)
 }
 
 /// Dependency graph for stratification analysis
@@ -71,10 +71,18 @@ fn build_dependency_graph(rules: &[Rule]) -> DependencyGraph {
         for literal in &rule.body {
             match literal {
                 Literal::Positive(atom) => {
-                    graph.add_dependency(head_pred.clone(), atom.predicate.clone(), DependencyType::Positive);
+                    graph.add_dependency(
+                        head_pred.clone(),
+                        atom.predicate.clone(),
+                        DependencyType::Positive,
+                    );
                 }
                 Literal::Negative(atom) => {
-                    graph.add_dependency(head_pred.clone(), atom.predicate.clone(), DependencyType::Negative);
+                    graph.add_dependency(
+                        head_pred.clone(),
+                        atom.predicate.clone(),
+                        DependencyType::Negative,
+                    );
                 }
             }
         }
@@ -389,7 +397,10 @@ mod tests {
         let rules = vec![
             make_rule(
                 make_atom("path", vec![var("X"), var("Y")]),
-                vec![Literal::Positive(make_atom("edge", vec![var("X"), var("Y")]))],
+                vec![Literal::Positive(make_atom(
+                    "edge",
+                    vec![var("X"), var("Y")],
+                ))],
             ),
             make_rule(
                 make_atom("path", vec![var("X"), var("Z")]),

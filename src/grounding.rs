@@ -1,8 +1,8 @@
-use crate::ast::{Rule, Atom, Literal, Term, Value, ChoiceRule, ChoiceElement};
+use crate::ast::{Atom, ChoiceElement, ChoiceRule, Literal, Rule, Term, Value};
+use crate::builtins;
+use crate::constants::ConstantEnv;
 use crate::database::FactDatabase;
 use crate::unification::Substitution;
-use crate::constants::ConstantEnv;
-use crate::builtins;
 use internment::Intern;
 
 /// Ground a rule: generate all ground instances by substituting variables
@@ -56,7 +56,7 @@ pub fn satisfy_body(body: &[Literal], db: &FactDatabase) -> Vec<Substitution> {
                         let applied_builtin = apply_subst_to_builtin(&subst, &builtin);
                         match builtins::eval_builtin(&applied_builtin, &subst) {
                             Some(true) => result.push(subst),
-                            _ => {},  // Built-in failed, skip this substitution
+                            _ => {} // Built-in failed, skip this substitution
                         }
                     }
 
@@ -160,11 +160,7 @@ fn combine_substs(s1: &Substitution, s2: &Substitution) -> Substitution {
 fn apply_subst_to_builtin(subst: &Substitution, builtin: &builtins::BuiltIn) -> builtins::BuiltIn {
     match builtin {
         builtins::BuiltIn::Comparison(op, left, right) => {
-            builtins::BuiltIn::Comparison(
-                op.clone(),
-                subst.apply(left),
-                subst.apply(right),
-            )
+            builtins::BuiltIn::Comparison(op.clone(), subst.apply(left), subst.apply(right))
         }
         builtins::BuiltIn::True => builtins::BuiltIn::True,
         builtins::BuiltIn::Fail => builtins::BuiltIn::Fail,
@@ -174,7 +170,11 @@ fn apply_subst_to_builtin(subst: &Substitution, builtin: &builtins::BuiltIn) -> 
 /// Ground a rule using semi-naive evaluation
 /// For multi-literal rules, this tries using delta at each position
 /// and the full database for other positions
-pub fn ground_rule_semi_naive(rule: &Rule, delta: &FactDatabase, full_db: &FactDatabase) -> Vec<Atom> {
+pub fn ground_rule_semi_naive(
+    rule: &Rule,
+    delta: &FactDatabase,
+    full_db: &FactDatabase,
+) -> Vec<Atom> {
     let mut results = Vec::new();
 
     if rule.body.is_empty() {
@@ -222,7 +222,11 @@ fn satisfy_body_mixed_recursive(
     match first_literal {
         Literal::Positive(atom) => {
             // Use delta if current position is delta_pos, otherwise use full_db
-            let db = if current_pos == delta_pos { delta } else { full_db };
+            let db = if current_pos == delta_pos {
+                delta
+            } else {
+                full_db
+            };
             let initial_substs = db.query(atom);
 
             if rest.is_empty() {
@@ -263,13 +267,8 @@ fn satisfy_body_mixed_recursive(
                     vec![]
                 }
             } else {
-                let rest_substs = satisfy_body_mixed_recursive(
-                    rest,
-                    delta,
-                    full_db,
-                    delta_pos,
-                    current_pos + 1,
-                );
+                let rest_substs =
+                    satisfy_body_mixed_recursive(rest, delta, full_db, delta_pos, current_pos + 1);
                 let mut result = Vec::new();
 
                 for subst in rest_substs {
@@ -325,7 +324,8 @@ pub fn expand_atom_ranges(atom: &Atom, const_env: &ConstantEnv) -> Vec<Atom> {
         let first_expansions: Vec<Term> = match first {
             Term::Range(start, end) => {
                 if let Some(values) = expand_range(start, end, const_env) {
-                    values.into_iter()
+                    values
+                        .into_iter()
                         .map(|n| Term::Constant(Value::Integer(n)))
                         .collect()
                 } else {
@@ -352,7 +352,8 @@ pub fn expand_atom_ranges(atom: &Atom, const_env: &ConstantEnv) -> Vec<Atom> {
 
     let expanded_term_lists = expand_terms_recursive(&atom.terms, const_env);
 
-    expanded_term_lists.into_iter()
+    expanded_term_lists
+        .into_iter()
         .map(|terms| Atom {
             predicate: atom.predicate.clone(),
             terms,
@@ -412,7 +413,9 @@ pub fn ground_choice_rule(
             // Apply body substitution to element
             let element_with_body_subst = ChoiceElement {
                 atom: body_subst.apply_atom(&element.atom),
-                condition: element.condition.iter()
+                condition: element
+                    .condition
+                    .iter()
                     .map(|lit| apply_subst_to_literal(&body_subst, lit))
                     .collect(),
             };
@@ -464,7 +467,9 @@ pub fn ground_choice_rule_split(
             // Apply body substitution to element
             let element_with_body_subst = ChoiceElement {
                 atom: body_subst.apply_atom(&element.atom),
-                condition: element.condition.iter()
+                condition: element
+                    .condition
+                    .iter()
                     .map(|lit| apply_subst_to_literal(&body_subst, lit))
                     .collect(),
             };
@@ -512,12 +517,18 @@ mod tests {
     #[test]
     fn test_ground_rule_no_variables() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("parent", vec![atom_const("john"), atom_const("mary")]));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_const("john"), atom_const("mary")],
+        ));
 
         // Rule: ancestor(john, mary) :- parent(john, mary).
         let rule = make_rule(
             make_atom("ancestor", vec![atom_const("john"), atom_const("mary")]),
-            vec![Literal::Positive(make_atom("parent", vec![atom_const("john"), atom_const("mary")]))],
+            vec![Literal::Positive(make_atom(
+                "parent",
+                vec![atom_const("john"), atom_const("mary")],
+            ))],
         );
 
         let results = ground_rule(&rule, &db);
@@ -528,13 +539,22 @@ mod tests {
     #[test]
     fn test_ground_rule_single_variable() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("parent", vec![atom_const("john"), atom_const("mary")]));
-        db.insert(make_atom("parent", vec![atom_const("john"), atom_const("bob")]));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_const("john"), atom_const("mary")],
+        ));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_const("john"), atom_const("bob")],
+        ));
 
         // Rule: child(X) :- parent(john, X).
         let rule = make_rule(
             make_atom("child", vec![var("X")]),
-            vec![Literal::Positive(make_atom("parent", vec![atom_const("john"), var("X")]))],
+            vec![Literal::Positive(make_atom(
+                "parent",
+                vec![atom_const("john"), var("X")],
+            ))],
         );
 
         let results = ground_rule(&rule, &db);
@@ -542,19 +562,30 @@ mod tests {
 
         // Both child(mary) and child(bob) should be generated
         let predicates: Vec<_> = results.iter().map(|a| &a.predicate).collect();
-        assert!(predicates.iter().all(|p| **p == Intern::new("child".to_string())));
+        assert!(predicates
+            .iter()
+            .all(|p| **p == Intern::new("child".to_string())));
     }
 
     #[test]
     fn test_ground_rule_multiple_variables() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("parent", vec![atom_const("john"), atom_const("mary")]));
-        db.insert(make_atom("parent", vec![atom_const("bob"), atom_const("alice")]));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_const("john"), atom_const("mary")],
+        ));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_const("bob"), atom_const("alice")],
+        ));
 
         // Rule: ancestor(X, Y) :- parent(X, Y).
         let rule = make_rule(
             make_atom("ancestor", vec![var("X"), var("Y")]),
-            vec![Literal::Positive(make_atom("parent", vec![var("X"), var("Y")]))],
+            vec![Literal::Positive(make_atom(
+                "parent",
+                vec![var("X"), var("Y")],
+            ))],
         );
 
         let results = ground_rule(&rule, &db);
@@ -564,9 +595,18 @@ mod tests {
     #[test]
     fn test_ground_rule_join_two_literals() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("parent", vec![atom_const("john"), atom_const("mary")]));
-        db.insert(make_atom("parent", vec![atom_const("mary"), atom_const("alice")]));
-        db.insert(make_atom("parent", vec![atom_const("bob"), atom_const("charlie")]));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_const("john"), atom_const("mary")],
+        ));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_const("mary"), atom_const("alice")],
+        ));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_const("bob"), atom_const("charlie")],
+        ));
 
         // Rule: grandparent(X, Z) :- parent(X, Y), parent(Y, Z).
         let rule = make_rule(
@@ -610,13 +650,19 @@ mod tests {
     #[test]
     fn test_ground_rule_no_matches() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("parent", vec![atom_const("john"), atom_const("mary")]));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_const("john"), atom_const("mary")],
+        ));
 
         // Rule: child(X) :- parent(alice, X).
         // No facts match parent(alice, X)
         let rule = make_rule(
             make_atom("child", vec![var("X")]),
-            vec![Literal::Positive(make_atom("parent", vec![atom_const("alice"), var("X")]))],
+            vec![Literal::Positive(make_atom(
+                "parent",
+                vec![atom_const("alice"), var("X")],
+            ))],
         );
 
         let results = ground_rule(&rule, &db);
@@ -629,10 +675,7 @@ mod tests {
 
         // Rule: fact(a) :- .
         // (A rule with no body is always true)
-        let rule = make_rule(
-            make_atom("fact", vec![atom_const("a")]),
-            vec![],
-        );
+        let rule = make_rule(make_atom("fact", vec![atom_const("a")]), vec![]);
 
         let results = ground_rule(&rule, &db);
         assert_eq!(results.len(), 1);
@@ -716,7 +759,10 @@ mod tests {
         // Rule: not_bird_polly :- not bird(polly).
         let rule = make_rule(
             make_atom("not_bird_polly", vec![]),
-            vec![Literal::Negative(make_atom("bird", vec![atom_const("polly")]))],
+            vec![Literal::Negative(make_atom(
+                "bird",
+                vec![atom_const("polly")],
+            ))],
         );
 
         let results = ground_rule(&rule, &db);
@@ -750,8 +796,8 @@ mod tests {
 
     #[test]
     fn test_integration_parse_ground_query() {
-        use crate::parser;
         use crate::ast::Statement;
+        use crate::parser;
 
         // A complete ProcLog program with facts and rules
         let program_text = r#"
@@ -766,8 +812,7 @@ mod tests {
         "#;
 
         // Step 1: Parse the program
-        let program = parser::parse_program(program_text)
-            .expect("Should parse successfully");
+        let program = parser::parse_program(program_text).expect("Should parse successfully");
 
         // Step 2: Load facts into database
         let mut db = FactDatabase::new();
@@ -850,13 +895,16 @@ mod tests {
     #[test]
     fn test_expand_atom_ranges_single_range() {
         let const_env = ConstantEnv::new();
-        let atom = make_atom("cell", vec![
-            Term::Range(
-                Box::new(Term::Constant(Value::Integer(1))),
-                Box::new(Term::Constant(Value::Integer(3)))
-            ),
-            atom_const("a")
-        ]);
+        let atom = make_atom(
+            "cell",
+            vec![
+                Term::Range(
+                    Box::new(Term::Constant(Value::Integer(1))),
+                    Box::new(Term::Constant(Value::Integer(3))),
+                ),
+                atom_const("a"),
+            ],
+        );
 
         let result = expand_atom_ranges(&atom, &const_env);
         assert_eq!(result.len(), 3);
@@ -868,16 +916,19 @@ mod tests {
     #[test]
     fn test_expand_atom_ranges_multiple_ranges() {
         let const_env = ConstantEnv::new();
-        let atom = make_atom("cell", vec![
-            Term::Range(
-                Box::new(Term::Constant(Value::Integer(1))),
-                Box::new(Term::Constant(Value::Integer(2)))
-            ),
-            Term::Range(
-                Box::new(Term::Constant(Value::Integer(10))),
-                Box::new(Term::Constant(Value::Integer(11)))
-            )
-        ]);
+        let atom = make_atom(
+            "cell",
+            vec![
+                Term::Range(
+                    Box::new(Term::Constant(Value::Integer(1))),
+                    Box::new(Term::Constant(Value::Integer(2))),
+                ),
+                Term::Range(
+                    Box::new(Term::Constant(Value::Integer(10))),
+                    Box::new(Term::Constant(Value::Integer(11))),
+                ),
+            ],
+        );
 
         let result = expand_atom_ranges(&atom, &const_env);
         assert_eq!(result.len(), 4); // 2 * 2 = 4 combinations
@@ -927,20 +978,29 @@ mod tests {
         let const_env = ConstantEnv::new();
 
         let element = ChoiceElement {
-            atom: make_atom("cell", vec![
-                Term::Range(
-                    Box::new(Term::Constant(Value::Integer(1))),
-                    Box::new(Term::Constant(Value::Integer(2)))
-                ),
-                atom_const("solid")
-            ]),
+            atom: make_atom(
+                "cell",
+                vec![
+                    Term::Range(
+                        Box::new(Term::Constant(Value::Integer(1))),
+                        Box::new(Term::Constant(Value::Integer(2))),
+                    ),
+                    atom_const("solid"),
+                ],
+            ),
             condition: vec![],
         };
 
         let result = ground_choice_element(&element, &db, &const_env);
         assert_eq!(result.len(), 2);
-        assert_eq!(result[0], make_atom("cell", vec![int(1), atom_const("solid")]));
-        assert_eq!(result[1], make_atom("cell", vec![int(2), atom_const("solid")]));
+        assert_eq!(
+            result[0],
+            make_atom("cell", vec![int(1), atom_const("solid")])
+        );
+        assert_eq!(
+            result[1],
+            make_atom("cell", vec![int(2), atom_const("solid")])
+        );
     }
 
     // Edge case tests for range expansion
@@ -1023,13 +1083,16 @@ mod tests {
     fn test_expand_atom_ranges_empty_range() {
         let const_env = ConstantEnv::new();
         // 5..1 is a backwards range (empty)
-        let atom = make_atom("cell", vec![
-            Term::Range(
-                Box::new(Term::Constant(Value::Integer(5))),
-                Box::new(Term::Constant(Value::Integer(1)))
-            ),
-            atom_const("x")
-        ]);
+        let atom = make_atom(
+            "cell",
+            vec![
+                Term::Range(
+                    Box::new(Term::Constant(Value::Integer(5))),
+                    Box::new(Term::Constant(Value::Integer(1))),
+                ),
+                atom_const("x"),
+            ],
+        );
 
         let result = expand_atom_ranges(&atom, &const_env);
         // Empty range produces no atoms
@@ -1039,19 +1102,34 @@ mod tests {
     #[test]
     fn test_expand_atom_ranges_mixed_terms() {
         let const_env = ConstantEnv::new();
-        let atom = make_atom("cell", vec![
-            atom_const("prefix"),
-            Term::Range(
-                Box::new(Term::Constant(Value::Integer(1))),
-                Box::new(Term::Constant(Value::Integer(2)))
-            ),
-            atom_const("suffix")
-        ]);
+        let atom = make_atom(
+            "cell",
+            vec![
+                atom_const("prefix"),
+                Term::Range(
+                    Box::new(Term::Constant(Value::Integer(1))),
+                    Box::new(Term::Constant(Value::Integer(2))),
+                ),
+                atom_const("suffix"),
+            ],
+        );
 
         let result = expand_atom_ranges(&atom, &const_env);
         assert_eq!(result.len(), 2);
-        assert_eq!(result[0], make_atom("cell", vec![atom_const("prefix"), int(1), atom_const("suffix")]));
-        assert_eq!(result[1], make_atom("cell", vec![atom_const("prefix"), int(2), atom_const("suffix")]));
+        assert_eq!(
+            result[0],
+            make_atom(
+                "cell",
+                vec![atom_const("prefix"), int(1), atom_const("suffix")]
+            )
+        );
+        assert_eq!(
+            result[1],
+            make_atom(
+                "cell",
+                vec![atom_const("prefix"), int(2), atom_const("suffix")]
+            )
+        );
     }
 
     #[test]
@@ -1163,12 +1241,18 @@ mod tests {
         let result = satisfy_body(&body, &db);
 
         // Should have exactly one substitution: {X -> 7}
-        assert_eq!(result.len(), 1, "Expected 1 substitution, got {}: {:#?}", result.len(), result);
+        assert_eq!(
+            result.len(),
+            1,
+            "Expected 1 substitution, got {}: {:#?}",
+            result.len(),
+            result
+        );
 
         let x_var = Intern::new("X".to_string());
         let bound_value = result[0].get(&x_var).expect("X should be bound");
         match bound_value {
-            Term::Constant(Value::Integer(7)) => {},
+            Term::Constant(Value::Integer(7)) => {}
             _ => panic!("Expected X to be bound to 7, got {:?}", bound_value),
         }
     }
@@ -1194,10 +1278,16 @@ mod tests {
         let result = ground_rule(&rule, &db);
 
         // Should derive large(7)
-        assert_eq!(result.len(), 1, "Expected 1 derived fact, got {}: {:#?}", result.len(), result);
+        assert_eq!(
+            result.len(),
+            1,
+            "Expected 1 derived fact, got {}: {:#?}",
+            result.len(),
+            result
+        );
 
         match &result[0].terms[0] {
-            Term::Constant(Value::Integer(7)) => {},
+            Term::Constant(Value::Integer(7)) => {}
             other => panic!("Expected large(7), got large({:?})", other),
         }
     }
@@ -1291,7 +1381,8 @@ mod tests {
         assert_eq!(result[0].len(), 2, "Expected 2 atoms in the group");
 
         // Verify atoms
-        let atoms: Vec<String> = result[0].iter()
+        let atoms: Vec<String> = result[0]
+            .iter()
             .map(|a| format!("{:?}", a.predicate))
             .collect();
         assert!(atoms.iter().all(|s| s.contains("selected")));
@@ -1330,16 +1421,26 @@ mod tests {
 
         // Verify first group is for one player (either alice or bob)
         let first_group_player = &result[0][0].terms[0];
-        assert!(result[0].iter().all(|atom| &atom.terms[0] == first_group_player),
-            "All atoms in first group should be for same player");
+        assert!(
+            result[0]
+                .iter()
+                .all(|atom| &atom.terms[0] == first_group_player),
+            "All atoms in first group should be for same player"
+        );
 
         // Verify second group is for the other player
         let second_group_player = &result[1][0].terms[0];
-        assert!(result[1].iter().all(|atom| &atom.terms[0] == second_group_player),
-            "All atoms in second group should be for same player");
+        assert!(
+            result[1]
+                .iter()
+                .all(|atom| &atom.terms[0] == second_group_player),
+            "All atoms in second group should be for same player"
+        );
 
         // Verify different players
-        assert_ne!(first_group_player, second_group_player,
-            "Each group should be for a different player");
+        assert_ne!(
+            first_group_player, second_group_player,
+            "Each group should be for a different player"
+        );
     }
 }

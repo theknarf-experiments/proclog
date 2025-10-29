@@ -1,7 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use crate::ast::{Atom, Symbol, Term, Value};
+use crate::unification::{unify_atoms, Substitution};
 use internment::Intern;
-use crate::ast::{Atom, Term, Value, Symbol};
-use crate::unification::{Substitution, unify_atoms};
+use std::collections::{HashMap, HashSet};
 
 /// A database of ground facts with efficient indexing
 #[derive(Debug, Clone)]
@@ -98,7 +98,7 @@ fn is_ground_term(term: &Term) -> bool {
     match term {
         Term::Variable(_) => false,
         Term::Constant(_) => true,
-        Term::Range(_, _) => true,  // Ranges are ground (no variables)
+        Term::Range(_, _) => true, // Ranges are ground (no variables)
         Term::Compound(_, args) => args.iter().all(is_ground_term),
     }
 }
@@ -168,8 +168,14 @@ mod tests {
     fn test_insert_multiple_facts() {
         let mut db = FactDatabase::new();
 
-        db.insert(make_atom("parent", vec![atom_const("john"), atom_const("mary")]));
-        db.insert(make_atom("parent", vec![atom_const("mary"), atom_const("alice")]));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_const("john"), atom_const("mary")],
+        ));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_const("mary"), atom_const("alice")],
+        ));
         db.insert(make_atom("age", vec![atom_const("john"), int(42)]));
 
         assert_eq!(db.len(), 3);
@@ -190,7 +196,10 @@ mod tests {
     #[test]
     fn test_query_with_one_variable() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("parent", vec![atom_const("john"), atom_const("mary")]));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_const("john"), atom_const("mary")],
+        ));
 
         let pattern = make_atom("parent", vec![atom_const("john"), var("X")]);
         let results = db.query(&pattern);
@@ -203,7 +212,10 @@ mod tests {
     #[test]
     fn test_query_with_multiple_variables() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("parent", vec![atom_const("john"), atom_const("mary")]));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_const("john"), atom_const("mary")],
+        ));
 
         let pattern = make_atom("parent", vec![var("X"), var("Y")]);
         let results = db.query(&pattern);
@@ -218,9 +230,18 @@ mod tests {
     #[test]
     fn test_query_multiple_matches() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("parent", vec![atom_const("john"), atom_const("mary")]));
-        db.insert(make_atom("parent", vec![atom_const("john"), atom_const("bob")]));
-        db.insert(make_atom("parent", vec![atom_const("alice"), atom_const("charlie")]));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_const("john"), atom_const("mary")],
+        ));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_const("john"), atom_const("bob")],
+        ));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_const("alice"), atom_const("charlie")],
+        ));
 
         let pattern = make_atom("parent", vec![atom_const("john"), var("X")]);
         let results = db.query(&pattern);
@@ -231,7 +252,10 @@ mod tests {
     #[test]
     fn test_query_no_matches() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("parent", vec![atom_const("john"), atom_const("mary")]));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_const("john"), atom_const("mary")],
+        ));
 
         let pattern = make_atom("parent", vec![atom_const("alice"), var("X")]);
         let results = db.query(&pattern);
@@ -242,7 +266,10 @@ mod tests {
     #[test]
     fn test_query_wrong_predicate() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("parent", vec![atom_const("john"), atom_const("mary")]));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_const("john"), atom_const("mary")],
+        ));
 
         let pattern = make_atom("child", vec![atom_const("john"), var("X")]);
         let results = db.query(&pattern);
@@ -254,8 +281,14 @@ mod tests {
     #[test]
     fn test_get_by_predicate() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("parent", vec![atom_const("john"), atom_const("mary")]));
-        db.insert(make_atom("parent", vec![atom_const("bob"), atom_const("alice")]));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_const("john"), atom_const("mary")],
+        ));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_const("bob"), atom_const("alice")],
+        ));
         db.insert(make_atom("age", vec![atom_const("john"), int(42)]));
 
         let parent_pred = Intern::new("parent".to_string());
@@ -277,7 +310,10 @@ mod tests {
     #[test]
     fn test_all_facts() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("parent", vec![atom_const("john"), atom_const("mary")]));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_const("john"), atom_const("mary")],
+        ));
         db.insert(make_atom("age", vec![atom_const("john"), int(42)]));
 
         let all = db.all_facts();
@@ -291,16 +327,11 @@ mod tests {
         assert!(is_ground_term(&int(42)));
         assert!(!is_ground_term(&var("X")));
 
-        let compound = Term::Compound(
-            Intern::new("f".to_string()),
-            vec![atom_const("a"), int(1)]
-        );
+        let compound = Term::Compound(Intern::new("f".to_string()), vec![atom_const("a"), int(1)]);
         assert!(is_ground_term(&compound));
 
-        let compound_with_var = Term::Compound(
-            Intern::new("f".to_string()),
-            vec![var("X"), int(1)]
-        );
+        let compound_with_var =
+            Term::Compound(Intern::new("f".to_string()), vec![var("X"), int(1)]);
         assert!(!is_ground_term(&compound_with_var));
     }
 }

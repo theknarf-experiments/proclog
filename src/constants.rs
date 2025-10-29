@@ -1,6 +1,6 @@
-use crate::ast::{Symbol, Term, Value, Program, Statement, Atom};
-use std::collections::HashMap;
+use crate::ast::{Atom, Program, Statement, Symbol, Term, Value};
 use internment::Intern;
+use std::collections::HashMap;
 
 /// Environment storing constant declarations
 #[derive(Debug, Clone)]
@@ -52,10 +52,8 @@ impl ConstantEnv {
             }
             Term::Compound(functor, args) => {
                 // Recursively substitute in compound terms
-                let new_args: Vec<Term> = args
-                    .iter()
-                    .map(|arg| self.substitute_term(arg))
-                    .collect();
+                let new_args: Vec<Term> =
+                    args.iter().map(|arg| self.substitute_term(arg)).collect();
                 Term::Compound(functor.clone(), new_args)
             }
             _ => term.clone(),

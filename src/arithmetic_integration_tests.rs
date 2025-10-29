@@ -9,8 +9,8 @@
 
 #[cfg(test)]
 mod arithmetic_integration_tests {
+    use crate::ast::{Literal, Statement, Term, Value};
     use crate::parser::parse_program;
-    use crate::ast::{Statement, Term, Value, Literal};
     use internment::Intern;
 
     #[test]
