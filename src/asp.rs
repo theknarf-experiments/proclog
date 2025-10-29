@@ -11,6 +11,21 @@ pub struct AnswerSet {
     pub atoms: HashSet<Atom>,
 }
 
+/// Resolve a bound term to an integer value
+///
+/// Takes a Term that is either:
+/// - An integer constant: Term::Constant(Value::Integer(n))
+/// - An atom that refers to a constant name: Term::Constant(Value::Atom(name))
+///
+/// Returns Some(i64) if the term can be resolved, None otherwise
+fn resolve_bound(bound: &Term, const_env: &ConstantEnv) -> Option<i64> {
+    match bound {
+        Term::Constant(Value::Integer(n)) => Some(*n),
+        Term::Constant(Value::Atom(name)) => const_env.get(name),
+        _ => None,
+    }
+}
+
 /// Generate all subsets of a given size range
 fn generate_subsets<T: Clone>(items: &[T], min_size: usize, max_size: usize) -> Vec<Vec<T>> {
     let mut result = Vec::new();
@@ -195,8 +210,12 @@ pub fn asp_evaluation(program: &Program) -> Vec<AnswerSet> {
                 .collect();
 
             // Determine bounds for this specific choice rule
-            let min_size = choice.lower_bound.unwrap_or(0) as usize;
-            let max_size = choice.upper_bound
+            // Resolve bounds from Terms to i64 values, substituting constant names
+            let min_size = choice.lower_bound.as_ref()
+                .and_then(|term| resolve_bound(term, &const_env))
+                .unwrap_or(0) as usize;
+            let max_size = choice.upper_bound.as_ref()
+                .and_then(|term| resolve_bound(term, &const_env))
                 .map(|u| u as usize)
                 .unwrap_or(unique_atoms.len());
 

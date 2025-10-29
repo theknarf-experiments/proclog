@@ -371,12 +371,17 @@ fn const_decl() -> impl Parser<char, Statement, Error = ParseError> + Clone {
 
 /// Parse a choice rule: { atom1; atom2 } or 1 { atom1; atom2 } 2 :- body.
 fn choice_rule() -> impl Parser<char, Statement, Error = ParseError> + Clone {
-    // Optional lower bound
-    let lower_bound = text::int(10)
-        .try_map(|s: String, span: std::ops::Range<usize>| {
-            s.parse::<i64>()
-                .map_err(|_| ParseError::custom(span, "invalid integer"))
-        })
+    // Optional lower bound - can be integer or identifier (constant name)
+    let lower_bound = choice((
+        text::int(10)
+            .try_map(|s: String, span: std::ops::Range<usize>| {
+                s.parse::<i64>()
+                    .map(|n| Term::Constant(Value::Integer(n)))
+                    .map_err(|_| ParseError::custom(span, "invalid integer"))
+            }),
+        lowercase_ident()
+            .map(|s| Term::Constant(Value::Atom(Intern::new(s))))
+    ))
         .padded()
         .or_not();
 
@@ -405,12 +410,17 @@ fn choice_rule() -> impl Parser<char, Statement, Error = ParseError> + Clone {
         .at_least(1)
         .delimited_by(just('{').padded(), just('}').padded());
 
-    // Optional upper bound
-    let upper_bound = text::int(10)
-        .try_map(|s: String, span: std::ops::Range<usize>| {
-            s.parse::<i64>()
-                .map_err(|_| ParseError::custom(span, "invalid integer"))
-        })
+    // Optional upper bound - can be integer or identifier (constant name)
+    let upper_bound = choice((
+        text::int(10)
+            .try_map(|s: String, span: std::ops::Range<usize>| {
+                s.parse::<i64>()
+                    .map(|n| Term::Constant(Value::Integer(n)))
+                    .map_err(|_| ParseError::custom(span, "invalid integer"))
+            }),
+        lowercase_ident()
+            .map(|s| Term::Constant(Value::Atom(Intern::new(s))))
+    ))
         .padded()
         .or_not();
 
@@ -881,8 +891,8 @@ mod tests {
 
         match &program.statements[0] {
             Statement::ChoiceRule(choice) => {
-                assert_eq!(choice.lower_bound, Some(1));
-                assert_eq!(choice.upper_bound, Some(2));
+                assert_eq!(choice.lower_bound, Some(Term::Constant(Value::Integer(1))));
+                assert_eq!(choice.upper_bound, Some(Term::Constant(Value::Integer(2))));
                 assert_eq!(choice.elements.len(), 3);
             }
             _ => panic!("Expected choice rule"),
@@ -897,7 +907,7 @@ mod tests {
 
         match &result.unwrap().statements[0] {
             Statement::ChoiceRule(choice) => {
-                assert_eq!(choice.lower_bound, Some(2));
+                assert_eq!(choice.lower_bound, Some(Term::Constant(Value::Integer(2))));
                 assert_eq!(choice.upper_bound, None);
             }
             _ => panic!("Expected choice rule"),
@@ -1387,6 +1397,101 @@ mod tests {
                 }
             }
             _ => panic!("Expected rule"),
+        }
+    }
+
+    // Constant names in cardinality bounds tests
+    #[test]
+    fn test_parse_choice_with_constant_lower_bound() {
+        let input = "min { selected(X) : item(X) }.";
+        let result = parse_program(input);
+        assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+        match &result.unwrap().statements[0] {
+            Statement::ChoiceRule(choice) => {
+                // Lower bound should be parsed as a constant name
+                assert!(choice.lower_bound.is_some());
+                match &choice.lower_bound {
+                    Some(Term::Constant(Value::Atom(name))) => {
+                        assert_eq!(*name, Intern::new("min".to_string()));
+                    }
+                    _ => panic!("Expected atom constant for lower bound, got {:?}", choice.lower_bound),
+                }
+                assert!(choice.upper_bound.is_none());
+            }
+            _ => panic!("Expected choice rule"),
+        }
+    }
+
+    #[test]
+    fn test_parse_choice_with_constant_upper_bound() {
+        let input = "{ selected(X) : item(X) } max.";
+        let result = parse_program(input);
+        assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+        match &result.unwrap().statements[0] {
+            Statement::ChoiceRule(choice) => {
+                assert!(choice.lower_bound.is_none());
+                assert!(choice.upper_bound.is_some());
+                match &choice.upper_bound {
+                    Some(Term::Constant(Value::Atom(name))) => {
+                        assert_eq!(*name, Intern::new("max".to_string()));
+                    }
+                    _ => panic!("Expected atom constant for upper bound, got {:?}", choice.upper_bound),
+                }
+            }
+            _ => panic!("Expected choice rule"),
+        }
+    }
+
+    #[test]
+    fn test_parse_choice_with_constant_both_bounds() {
+        let input = "min { selected(X) : item(X) } max.";
+        let result = parse_program(input);
+        assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+        match &result.unwrap().statements[0] {
+            Statement::ChoiceRule(choice) => {
+                assert!(choice.lower_bound.is_some());
+                assert!(choice.upper_bound.is_some());
+                match &choice.lower_bound {
+                    Some(Term::Constant(Value::Atom(name))) => {
+                        assert_eq!(*name, Intern::new("min".to_string()));
+                    }
+                    _ => panic!("Expected atom constant for lower bound"),
+                }
+                match &choice.upper_bound {
+                    Some(Term::Constant(Value::Atom(name))) => {
+                        assert_eq!(*name, Intern::new("max".to_string()));
+                    }
+                    _ => panic!("Expected atom constant for upper bound"),
+                }
+            }
+            _ => panic!("Expected choice rule"),
+        }
+    }
+
+    #[test]
+    fn test_parse_choice_with_mixed_bounds() {
+        // Integer lower, constant upper
+        let input = "2 { selected(X) : item(X) } max.";
+        let result = parse_program(input);
+        assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+        match &result.unwrap().statements[0] {
+            Statement::ChoiceRule(choice) => {
+                match &choice.lower_bound {
+                    Some(Term::Constant(Value::Integer(2))) => {},
+                    _ => panic!("Expected integer 2 for lower bound, got {:?}", choice.lower_bound),
+                }
+                match &choice.upper_bound {
+                    Some(Term::Constant(Value::Atom(name))) => {
+                        assert_eq!(*name, Intern::new("max".to_string()));
+                    }
+                    _ => panic!("Expected atom constant for upper bound"),
+                }
+            }
+            _ => panic!("Expected choice rule"),
         }
     }
 }

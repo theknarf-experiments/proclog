@@ -55,8 +55,8 @@ pub struct ConstDecl {
 /// A choice rule: `{ atom1; atom2 }` or `1 { atom1; atom2 } 3`
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChoiceRule {
-    pub lower_bound: Option<i64>,  // None means 0
-    pub upper_bound: Option<i64>,  // None means infinity
+    pub lower_bound: Option<Term>,  // None means 0, can be integer or constant name
+    pub upper_bound: Option<Term>,  // None means infinity, can be integer or constant name
     pub elements: Vec<ChoiceElement>,
     pub body: Vec<Literal>,  // Optional body like regular rules
 }

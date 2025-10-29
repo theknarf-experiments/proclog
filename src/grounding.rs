@@ -1131,8 +1131,8 @@ mod tests {
         let const_env = ConstantEnv::new();
 
         let choice = ChoiceRule {
-            lower_bound: Some(1),
-            upper_bound: Some(1),
+            lower_bound: Some(Term::Constant(Value::Integer(1))),
+            upper_bound: Some(Term::Constant(Value::Integer(1))),
             elements: vec![ChoiceElement {
                 atom: make_atom("selected", vec![var("X")]),
                 condition: vec![Literal::Positive(make_atom("item", vec![var("X")]))],
@@ -1244,8 +1244,8 @@ mod tests {
         let const_env = ConstantEnv::new();
 
         let choice = ChoiceRule {
-            lower_bound: Some(1),
-            upper_bound: Some(1),
+            lower_bound: Some(Term::Constant(Value::Integer(1))),
+            upper_bound: Some(Term::Constant(Value::Integer(1))),
             elements: vec![ChoiceElement {
                 atom: make_atom("has_weapon", vec![var("P"), var("W")]),
                 condition: vec![Literal::Positive(make_atom("weapon", vec![var("W")]))],
@@ -1310,8 +1310,8 @@ mod tests {
         let const_env = ConstantEnv::new();
 
         let choice = ChoiceRule {
-            lower_bound: Some(1),
-            upper_bound: Some(1),
+            lower_bound: Some(Term::Constant(Value::Integer(1))),
+            upper_bound: Some(Term::Constant(Value::Integer(1))),
             elements: vec![ChoiceElement {
                 atom: make_atom("has_weapon", vec![var("P"), var("W")]),
                 condition: vec![Literal::Positive(make_atom("weapon", vec![var("W")]))],

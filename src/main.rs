@@ -16,6 +16,9 @@ mod asp_multiple_choice_tests;
 #[cfg(test)]
 mod arithmetic_integration_tests;
 
+#[cfg(test)]
+mod choice_constant_bounds_tests;
+
 fn main() {
     println!("ProcLog - Datalog for Procedural Generation\n");
     println!("============================================\n");
@@ -280,11 +283,20 @@ fn demo_datatypes() {
                                  i + 1, const_decl.name, const_decl.value);
                     }
                     ast::Statement::ChoiceRule(choice) => {
-                        let bounds = match (choice.lower_bound, choice.upper_bound) {
+                        // Format bound terms for display
+                        let format_bound = |term: &ast::Term| -> String {
+                            match term {
+                                ast::Term::Constant(ast::Value::Integer(n)) => n.to_string(),
+                                ast::Term::Constant(ast::Value::Atom(a)) => a.to_string(),
+                                _ => "?".to_string(),
+                            }
+                        };
+
+                        let bounds = match (&choice.lower_bound, &choice.upper_bound) {
                             (None, None) => String::new(),
-                            (Some(l), None) => format!("{} ", l),
-                            (None, Some(u)) => format!(" {}", u),
-                            (Some(l), Some(u)) => format!("{} ... {}", l, u),
+                            (Some(l), None) => format!("{} ", format_bound(l)),
+                            (None, Some(u)) => format!(" {}", format_bound(u)),
+                            (Some(l), Some(u)) => format!("{} ... {}", format_bound(l), format_bound(u)),
                         };
                         println!("  {}. Choice Rule: {}{{ {} elements }}{}",
                                  i + 1, bounds, choice.elements.len(),
