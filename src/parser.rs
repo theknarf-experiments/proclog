@@ -333,22 +333,24 @@ fn prob_fact() -> impl Parser<char, Statement, Error = ParseError> + Clone {
 }
 
 /// Parse a constant declaration: #const name = value.
+/// Supports all value types: integers, floats, booleans, strings, atoms
 fn const_decl() -> impl Parser<char, Statement, Error = ParseError> + Clone {
     just('#')
         .then_ignore(text::keyword("const").padded())
         .ignore_then(lowercase_ident())
         .then_ignore(just('=').padded())
-        .then(
-            just('-')
-                .or_not()
-                .then(text::int(10))
-                .try_map(|(sign, num_str), span| {
-                    let num: i64 = num_str
-                        .parse()
-                        .map_err(|_| ParseError::custom(span, "invalid integer"))?;
-                    Ok(if sign.is_some() { -num } else { num })
-                }),
-        )
+        .then(choice((
+            // Try number (int or float) first
+            number(),
+            // Try string
+            string_literal().map(|s| Value::String(Intern::new(s))),
+            // Try boolean or atom (both are lowercase identifiers)
+            lowercase_ident().map(|s| match s.as_str() {
+                "true" => Value::Boolean(true),
+                "false" => Value::Boolean(false),
+                _ => Value::Atom(Intern::new(s)),
+            }),
+        )))
         .then_ignore(just('.').padded())
         .map(|(name, value)| {
             Statement::ConstDecl(ConstDecl {
@@ -800,7 +802,7 @@ mod tests {
         match &program.statements[0] {
             Statement::ConstDecl(const_decl) => {
                 assert_eq!(const_decl.name, Intern::new("width".to_string()));
-                assert_eq!(const_decl.value, 10);
+                assert_eq!(const_decl.value, Value::Integer(10));
             }
             _ => panic!("Expected constant declaration"),
         }
@@ -814,7 +816,110 @@ mod tests {
         match &program.statements[0] {
             Statement::ConstDecl(const_decl) => {
                 assert_eq!(const_decl.name, Intern::new("min_temp".to_string()));
-                assert_eq!(const_decl.value, -5);
+                assert_eq!(const_decl.value, Value::Integer(-5));
+            }
+            _ => panic!("Expected constant declaration"),
+        }
+    }
+
+    // Constant declarations with different data types
+    #[test]
+    fn test_parse_const_decl_float() {
+        let result = parse_program("#const pi = 3.14.");
+        assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+        let program = result.unwrap();
+        match &program.statements[0] {
+            Statement::ConstDecl(const_decl) => {
+                assert_eq!(const_decl.name, Intern::new("pi".to_string()));
+                match const_decl.value {
+                    Value::Float(f) => assert_eq!(f, 3.14),
+                    _ => panic!("Expected float value, got {:?}", const_decl.value),
+                }
+            }
+            _ => panic!("Expected constant declaration"),
+        }
+    }
+
+    #[test]
+    fn test_parse_const_decl_negative_float() {
+        let result = parse_program("#const neg = -2.5.");
+        assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+        let program = result.unwrap();
+        match &program.statements[0] {
+            Statement::ConstDecl(const_decl) => {
+                assert_eq!(const_decl.name, Intern::new("neg".to_string()));
+                match const_decl.value {
+                    Value::Float(f) => assert_eq!(f, -2.5),
+                    _ => panic!("Expected float value"),
+                }
+            }
+            _ => panic!("Expected constant declaration"),
+        }
+    }
+
+    #[test]
+    fn test_parse_const_decl_boolean_true() {
+        let result = parse_program("#const enabled = true.");
+        assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+        let program = result.unwrap();
+        match &program.statements[0] {
+            Statement::ConstDecl(const_decl) => {
+                assert_eq!(const_decl.name, Intern::new("enabled".to_string()));
+                match const_decl.value {
+                    Value::Boolean(true) => {},
+                    _ => panic!("Expected true boolean value"),
+                }
+            }
+            _ => panic!("Expected constant declaration"),
+        }
+    }
+
+    #[test]
+    fn test_parse_const_decl_boolean_false() {
+        let result = parse_program("#const disabled = false.");
+        assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+        let program = result.unwrap();
+        match &program.statements[0] {
+            Statement::ConstDecl(const_decl) => {
+                assert_eq!(const_decl.name, Intern::new("disabled".to_string()));
+                match const_decl.value {
+                    Value::Boolean(false) => {},
+                    _ => panic!("Expected false boolean value"),
+                }
+            }
+            _ => panic!("Expected constant declaration"),
+        }
+    }
+
+    #[test]
+    fn test_parse_const_decl_string() {
+        let result = parse_program("#const message = \"hello world\".");
+        assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+        let program = result.unwrap();
+        match &program.statements[0] {
+            Statement::ConstDecl(const_decl) => {
+                assert_eq!(const_decl.name, Intern::new("message".to_string()));
+                match &const_decl.value {
+                    Value::String(s) => assert_eq!(*s, Intern::new("hello world".to_string())),
+                    _ => panic!("Expected string value"),
+                }
+            }
+            _ => panic!("Expected constant declaration"),
+        }
+    }
+
+    #[test]
+    fn test_parse_const_decl_atom() {
+        let result = parse_program("#const default_color = red.");
+        assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+        let program = result.unwrap();
+        match &program.statements[0] {
+            Statement::ConstDecl(const_decl) => {
+                assert_eq!(const_decl.name, Intern::new("default_color".to_string()));
+                match &const_decl.value {
+                    Value::Atom(a) => assert_eq!(*a, Intern::new("red".to_string())),
+                    _ => panic!("Expected atom value"),
+                }
             }
             _ => panic!("Expected constant declaration"),
         }
@@ -835,7 +940,7 @@ mod tests {
         match &program.statements[0] {
             Statement::ConstDecl(c) => {
                 assert_eq!(c.name, Intern::new("width".to_string()));
-                assert_eq!(c.value, 10);
+                assert_eq!(c.value, Value::Integer(10));
             }
             _ => panic!("Expected const"),
         }
@@ -843,7 +948,7 @@ mod tests {
         match &program.statements[1] {
             Statement::ConstDecl(c) => {
                 assert_eq!(c.name, Intern::new("height".to_string()));
-                assert_eq!(c.value, 20);
+                assert_eq!(c.value, Value::Integer(20));
             }
             _ => panic!("Expected const"),
         }

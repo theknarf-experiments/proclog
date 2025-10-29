@@ -21,7 +21,7 @@ pub struct AnswerSet {
 fn resolve_bound(bound: &Term, const_env: &ConstantEnv) -> Option<i64> {
     match bound {
         Term::Constant(Value::Integer(n)) => Some(*n),
-        Term::Constant(Value::Atom(name)) => const_env.get(name),
+        Term::Constant(Value::Atom(name)) => const_env.get_int(name),
         _ => None,
     }
 }

@@ -45,11 +45,11 @@ pub struct ProbFact {
     pub atom: Atom,
 }
 
-/// A constant declaration: `#const width = 10.`
+/// A constant declaration: `#const width = 10.` or `#const pi = 3.14.` or `#const name = foo.`
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConstDecl {
     pub name: Symbol,
-    pub value: i64,
+    pub value: Value,
 }
 
 /// A choice rule: `{ atom1; atom2 }` or `1 { atom1; atom2 } 3`

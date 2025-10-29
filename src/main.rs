@@ -299,11 +299,18 @@ fn demo_datatypes() {
                         );
                     }
                     ast::Statement::ConstDecl(const_decl) => {
+                        let value_str = match &const_decl.value {
+                            ast::Value::Integer(n) => n.to_string(),
+                            ast::Value::Float(f) => f.to_string(),
+                            ast::Value::Boolean(b) => b.to_string(),
+                            ast::Value::String(s) => format!("\"{}\"", s),
+                            ast::Value::Atom(a) => a.to_string(),
+                        };
                         println!(
                             "  {}. Constant: {} = {}",
                             i + 1,
                             const_decl.name,
-                            const_decl.value
+                            value_str
                         );
                     }
                     ast::Statement::ChoiceRule(choice) => {

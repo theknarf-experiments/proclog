@@ -883,7 +883,7 @@ mod tests {
     #[test]
     fn test_expand_range_with_constants() {
         let mut const_env = ConstantEnv::new();
-        const_env.define(Intern::new("max".to_string()), 5);
+        const_env.define(Intern::new("max".to_string()), Value::Integer(5));
 
         let start = Term::Constant(Value::Integer(3));
         let end = Term::Constant(Value::Atom(Intern::new("max".to_string())));
