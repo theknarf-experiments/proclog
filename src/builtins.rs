@@ -42,11 +42,101 @@ pub enum BuiltIn {
     Fail,
 }
 
-/// Evaluate an arithmetic expression to an integer value
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Numeric {
+    Int(i64),
+    Float(f64),
+}
+
+impl Numeric {
+    fn from_value(value: &Value) -> Option<Self> {
+        match value {
+            Value::Integer(i) => Some(Numeric::Int(*i)),
+            Value::Float(f) => Some(Numeric::Float(*f)),
+            _ => None,
+        }
+    }
+
+    fn to_value(self) -> Value {
+        match self {
+            Numeric::Int(i) => Value::Integer(i),
+            Numeric::Float(f) => Value::Float(f),
+        }
+    }
+
+    fn promote(lhs: Numeric, rhs: Numeric) -> (Numeric, Numeric) {
+        match (lhs, rhs) {
+            (Numeric::Int(l), Numeric::Int(r)) => (Numeric::Int(l), Numeric::Int(r)),
+            (Numeric::Int(l), Numeric::Float(r)) => (Numeric::Float(l as f64), Numeric::Float(r)),
+            (Numeric::Float(l), Numeric::Int(r)) => (Numeric::Float(l), Numeric::Float(r as f64)),
+            (Numeric::Float(l), Numeric::Float(r)) => (Numeric::Float(l), Numeric::Float(r)),
+        }
+    }
+
+    fn add(self, other: Numeric) -> Numeric {
+        match (self, other) {
+            (Numeric::Int(l), Numeric::Int(r)) => Numeric::Int(l + r),
+            (l, r) => Numeric::Float(l.to_f64() + r.to_f64()),
+        }
+    }
+
+    fn sub(self, other: Numeric) -> Numeric {
+        match (self, other) {
+            (Numeric::Int(l), Numeric::Int(r)) => Numeric::Int(l - r),
+            (l, r) => Numeric::Float(l.to_f64() - r.to_f64()),
+        }
+    }
+
+    fn mul(self, other: Numeric) -> Numeric {
+        match (self, other) {
+            (Numeric::Int(l), Numeric::Int(r)) => Numeric::Int(l * r),
+            (l, r) => Numeric::Float(l.to_f64() * r.to_f64()),
+        }
+    }
+
+    fn div(self, other: Numeric) -> Option<Numeric> {
+        match (self, other) {
+            (Numeric::Int(_), Numeric::Int(0)) => None,
+            (Numeric::Int(l), Numeric::Int(r)) => Some(Numeric::Int(l / r)),
+            (l, r) => {
+                let divisor = r.to_f64();
+                if divisor == 0.0 {
+                    None
+                } else {
+                    Some(Numeric::Float(l.to_f64() / divisor))
+                }
+            }
+        }
+    }
+
+    fn modulo(self, other: Numeric) -> Option<Numeric> {
+        match (self, other) {
+            (Numeric::Int(_), Numeric::Int(0)) => None,
+            (Numeric::Int(l), Numeric::Int(r)) => Some(Numeric::Int(l % r)),
+            (l, r) => {
+                let divisor = r.to_f64();
+                if divisor == 0.0 {
+                    None
+                } else {
+                    Some(Numeric::Float(l.to_f64() % divisor))
+                }
+            }
+        }
+    }
+
+    fn to_f64(self) -> f64 {
+        match self {
+            Numeric::Int(i) => i as f64,
+            Numeric::Float(f) => f,
+        }
+    }
+}
+
+/// Evaluate an arithmetic expression to a numeric value
 /// Returns None if the expression cannot be evaluated (contains unbound variables)
-pub fn eval_arith(term: &Term, subst: &Substitution) -> Option<i64> {
+pub fn eval_arith(term: &Term, subst: &Substitution) -> Option<Value> {
     match term {
-        Term::Constant(Value::Integer(n)) => Some(*n),
+        Term::Constant(value) => Numeric::from_value(value).map(Numeric::to_value),
 
         Term::Variable(var) => {
             // Look up variable in substitution
@@ -61,37 +151,39 @@ pub fn eval_arith(term: &Term, subst: &Substitution) -> Option<i64> {
             // Check if this is an arithmetic operator
             match functor.as_ref().as_str() {
                 "+" if args.len() == 2 => {
-                    let left = eval_arith(&args[0], subst)?;
-                    let right = eval_arith(&args[1], subst)?;
-                    Some(left + right)
+                    let left_val = eval_arith(&args[0], subst)?;
+                    let right_val = eval_arith(&args[1], subst)?;
+                    let left = Numeric::from_value(&left_val)?;
+                    let right = Numeric::from_value(&right_val)?;
+                    Some(left.add(right).to_value())
                 }
                 "-" if args.len() == 2 => {
-                    let left = eval_arith(&args[0], subst)?;
-                    let right = eval_arith(&args[1], subst)?;
-                    Some(left - right)
+                    let left_val = eval_arith(&args[0], subst)?;
+                    let right_val = eval_arith(&args[1], subst)?;
+                    let left = Numeric::from_value(&left_val)?;
+                    let right = Numeric::from_value(&right_val)?;
+                    Some(left.sub(right).to_value())
                 }
                 "*" if args.len() == 2 => {
-                    let left = eval_arith(&args[0], subst)?;
-                    let right = eval_arith(&args[1], subst)?;
-                    Some(left * right)
+                    let left_val = eval_arith(&args[0], subst)?;
+                    let right_val = eval_arith(&args[1], subst)?;
+                    let left = Numeric::from_value(&left_val)?;
+                    let right = Numeric::from_value(&right_val)?;
+                    Some(left.mul(right).to_value())
                 }
                 "/" if args.len() == 2 => {
-                    let left = eval_arith(&args[0], subst)?;
-                    let right = eval_arith(&args[1], subst)?;
-                    if right == 0 {
-                        None // Division by zero
-                    } else {
-                        Some(left / right)
-                    }
+                    let left_val = eval_arith(&args[0], subst)?;
+                    let right_val = eval_arith(&args[1], subst)?;
+                    let left = Numeric::from_value(&left_val)?;
+                    let right = Numeric::from_value(&right_val)?;
+                    left.div(right).map(Numeric::to_value)
                 }
                 "mod" if args.len() == 2 => {
-                    let left = eval_arith(&args[0], subst)?;
-                    let right = eval_arith(&args[1], subst)?;
-                    if right == 0 {
-                        None // Modulo by zero
-                    } else {
-                        Some(left % right)
-                    }
+                    let left_val = eval_arith(&args[0], subst)?;
+                    let right_val = eval_arith(&args[1], subst)?;
+                    let left = Numeric::from_value(&left_val)?;
+                    let right = Numeric::from_value(&right_val)?;
+                    left.modulo(right).map(Numeric::to_value)
                 }
                 _ => None, // Not an arithmetic operator
             }
@@ -111,23 +203,40 @@ pub fn eval_comparison(
     subst: &Substitution,
 ) -> Option<bool> {
     // Try to evaluate both sides as arithmetic expressions
-    let left_val = eval_arith(left, subst);
-    let right_val = eval_arith(right, subst);
+    let left_val = eval_arith(left, subst)?;
+    let right_val = eval_arith(right, subst)?;
+    let left_num = Numeric::from_value(&left_val)?;
+    let right_num = Numeric::from_value(&right_val)?;
+    let (left_num, right_num) = Numeric::promote(left_num, right_num);
 
-    match (left_val, right_val) {
-        (Some(l), Some(r)) => {
-            let result = match op {
-                CompOp::Eq => l == r,
-                CompOp::Neq => l != r,
-                CompOp::Lt => l < r,
-                CompOp::Gt => l > r,
-                CompOp::Lte => l <= r,
-                CompOp::Gte => l >= r,
-            };
-            Some(result)
-        }
-        _ => None, // Cannot evaluate comparison
-    }
+    let result = match op {
+        CompOp::Eq => match (left_num, right_num) {
+            (Numeric::Int(l), Numeric::Int(r)) => l == r,
+            (l, r) => l.to_f64() == r.to_f64(),
+        },
+        CompOp::Neq => match (left_num, right_num) {
+            (Numeric::Int(l), Numeric::Int(r)) => l != r,
+            (l, r) => l.to_f64() != r.to_f64(),
+        },
+        CompOp::Lt => match (left_num, right_num) {
+            (Numeric::Int(l), Numeric::Int(r)) => l < r,
+            (l, r) => l.to_f64() < r.to_f64(),
+        },
+        CompOp::Gt => match (left_num, right_num) {
+            (Numeric::Int(l), Numeric::Int(r)) => l > r,
+            (l, r) => l.to_f64() > r.to_f64(),
+        },
+        CompOp::Lte => match (left_num, right_num) {
+            (Numeric::Int(l), Numeric::Int(r)) => l <= r,
+            (l, r) => l.to_f64() <= r.to_f64(),
+        },
+        CompOp::Gte => match (left_num, right_num) {
+            (Numeric::Int(l), Numeric::Int(r)) => l >= r,
+            (l, r) => l.to_f64() >= r.to_f64(),
+        },
+    };
+
+    Some(result)
 }
 
 /// Evaluate a built-in predicate
@@ -192,6 +301,10 @@ mod tests {
         Term::Constant(Value::Integer(n))
     }
 
+    fn float(f: f64) -> Term {
+        Term::Constant(Value::Float(f))
+    }
+
     fn var(name: &str) -> Term {
         Term::Variable(Intern::new(name.to_string()))
     }
@@ -200,13 +313,29 @@ mod tests {
         Term::Compound(Intern::new(op.to_string()), vec![left, right])
     }
 
+    fn assert_int(result: Option<Value>, expected: i64) {
+        match result {
+            Some(Value::Integer(v)) => assert_eq!(v, expected),
+            other => panic!("expected integer {expected}, got {:?}", other),
+        }
+    }
+
+    fn assert_float(result: Option<Value>, expected: f64) {
+        match result {
+            Some(Value::Float(v)) => {
+                assert!((v - expected).abs() < 1e-9, "expected {expected}, got {v}")
+            }
+            other => panic!("expected float {expected}, got {:?}", other),
+        }
+    }
+
     #[test]
     fn test_eval_arith_constants() {
         let subst = Substitution::new();
 
-        assert_eq!(eval_arith(&int(42), &subst), Some(42));
-        assert_eq!(eval_arith(&int(-10), &subst), Some(-10));
-        assert_eq!(eval_arith(&int(0), &subst), Some(0));
+        assert_int(eval_arith(&int(42), &subst), 42);
+        assert_int(eval_arith(&int(-10), &subst), -10);
+        assert_int(eval_arith(&int(0), &subst), 0);
     }
 
     #[test]
@@ -214,7 +343,7 @@ mod tests {
         let subst = Substitution::new();
         let expr = arith("+", int(3), int(4));
 
-        assert_eq!(eval_arith(&expr, &subst), Some(7));
+        assert_int(eval_arith(&expr, &subst), 7);
     }
 
     #[test]
@@ -222,7 +351,7 @@ mod tests {
         let subst = Substitution::new();
         let expr = arith("-", int(10), int(3));
 
-        assert_eq!(eval_arith(&expr, &subst), Some(7));
+        assert_int(eval_arith(&expr, &subst), 7);
     }
 
     #[test]
@@ -230,7 +359,7 @@ mod tests {
         let subst = Substitution::new();
         let expr = arith("*", int(6), int(7));
 
-        assert_eq!(eval_arith(&expr, &subst), Some(42));
+        assert_int(eval_arith(&expr, &subst), 42);
     }
 
     #[test]
@@ -238,7 +367,7 @@ mod tests {
         let subst = Substitution::new();
         let expr = arith("/", int(20), int(4));
 
-        assert_eq!(eval_arith(&expr, &subst), Some(5));
+        assert_int(eval_arith(&expr, &subst), 5);
     }
 
     #[test]
@@ -254,7 +383,7 @@ mod tests {
         let subst = Substitution::new();
         let expr = arith("mod", int(17), int(5));
 
-        assert_eq!(eval_arith(&expr, &subst), Some(2));
+        assert_int(eval_arith(&expr, &subst), 2);
     }
 
     #[test]
@@ -264,7 +393,7 @@ mod tests {
         let inner = arith("+", int(3), int(4));
         let expr = arith("*", inner, int(2));
 
-        assert_eq!(eval_arith(&expr, &subst), Some(14));
+        assert_int(eval_arith(&expr, &subst), 14);
     }
 
     #[test]
@@ -274,7 +403,7 @@ mod tests {
         subst.bind(Intern::new("Y".to_string()), int(3));
 
         let expr = arith("+", var("X"), var("Y"));
-        assert_eq!(eval_arith(&expr, &subst), Some(8));
+        assert_int(eval_arith(&expr, &subst), 8);
     }
 
     #[test]
@@ -283,6 +412,53 @@ mod tests {
         let expr = arith("+", var("X"), int(5));
 
         assert_eq!(eval_arith(&expr, &subst), None);
+    }
+
+    #[test]
+    fn test_eval_arith_float_constants() {
+        let subst = Substitution::new();
+
+        assert_float(eval_arith(&float(3.5), &subst), 3.5);
+    }
+
+    #[test]
+    fn test_eval_arith_mixed_addition() {
+        let subst = Substitution::new();
+        let expr = arith("+", int(2), float(0.5));
+
+        assert_float(eval_arith(&expr, &subst), 2.5);
+    }
+
+    #[test]
+    fn test_eval_arith_float_division() {
+        let subst = Substitution::new();
+        let expr = arith("/", float(7.5), int(2));
+
+        assert_float(eval_arith(&expr, &subst), 3.75);
+    }
+
+    #[test]
+    fn test_eval_arith_division_by_zero_float() {
+        let subst = Substitution::new();
+        let expr = arith("/", float(3.0), float(0.0));
+
+        assert_eq!(eval_arith(&expr, &subst), None);
+    }
+
+    #[test]
+    fn test_eval_arith_modulo_float_zero() {
+        let subst = Substitution::new();
+        let expr = arith("mod", float(3.0), float(0.0));
+
+        assert_eq!(eval_arith(&expr, &subst), None);
+    }
+
+    #[test]
+    fn test_eval_arith_float_modulo() {
+        let subst = Substitution::new();
+        let expr = arith("mod", float(5.5), int(2));
+
+        assert_float(eval_arith(&expr, &subst), 1.5);
     }
 
     #[test]
@@ -326,6 +502,42 @@ mod tests {
 
         assert_eq!(
             eval_comparison(&CompOp::Eq, &left, &right, &subst),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn test_eval_comparison_float_semantics() {
+        let subst = Substitution::new();
+
+        assert_eq!(
+            eval_comparison(&CompOp::Eq, &float(2.5), &float(2.5), &subst),
+            Some(true)
+        );
+        assert_eq!(
+            eval_comparison(&CompOp::Gt, &float(3.1), &float(3.0), &subst),
+            Some(true)
+        );
+        assert_eq!(
+            eval_comparison(&CompOp::Lt, &float(3.1), &float(3.0), &subst),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn test_eval_comparison_mixed_numeric_types() {
+        let subst = Substitution::new();
+
+        assert_eq!(
+            eval_comparison(&CompOp::Eq, &int(5), &float(5.0), &subst),
+            Some(true)
+        );
+        assert_eq!(
+            eval_comparison(&CompOp::Lt, &int(4), &float(4.1), &subst),
+            Some(true)
+        );
+        assert_eq!(
+            eval_comparison(&CompOp::Gt, &float(6.2), &int(6), &subst),
             Some(true)
         );
     }
