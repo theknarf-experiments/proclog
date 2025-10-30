@@ -306,12 +306,7 @@ fn demo_datatypes() {
                             ast::Value::String(s) => format!("\"{}\"", s),
                             ast::Value::Atom(a) => a.to_string(),
                         };
-                        println!(
-                            "  {}. Constant: {} = {}",
-                            i + 1,
-                            const_decl.name,
-                            value_str
-                        );
+                        println!("  {}. Constant: {} = {}", i + 1, const_decl.name, value_str);
                     }
                     ast::Statement::ChoiceRule(choice) => {
                         // Format bound terms for display

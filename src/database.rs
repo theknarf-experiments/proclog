@@ -1,6 +1,25 @@
-use crate::ast::{Atom, Symbol, Term, Value};
+//! Fact database with efficient indexing and querying
+//!
+//! This module provides a database for storing and querying ground facts.
+//! Facts are indexed by predicate name for efficient lookup.
+//!
+//! # Features
+//!
+//! - **Indexing**: Facts are indexed by predicate for O(1) lookup
+//! - **Ground facts only**: Only fully ground atoms (no variables) can be stored
+//! - **Unification-based querying**: Query with patterns containing variables
+//! - **Set semantics**: Duplicate facts are automatically deduplicated
+//!
+//! # Example
+//!
+//! ```ignore
+//! let mut db = FactDatabase::new();
+//! db.insert(ground_fact);
+//! let results = db.query(&pattern_with_variables);
+//! ```
+
+use crate::ast::{Atom, Symbol, Term};
 use crate::unification::{unify_atoms, Substitution};
-use internment::Intern;
 use std::collections::{HashMap, HashSet};
 
 /// A database of ground facts with efficient indexing
@@ -106,6 +125,8 @@ fn is_ground_term(term: &Term) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast::Value;
+    use internment::Intern;
 
     // Helper functions
     fn atom_const(name: &str) -> Term {

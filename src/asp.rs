@@ -1,8 +1,35 @@
-use crate::ast::{Atom, ChoiceRule, Constraint, Program, Rule, Statement, Term, Value};
+//! Answer Set Programming (ASP) solver
+//!
+//! This module implements an ASP solver that handles choice rules and finds answer sets.
+//! Answer sets are stable models that satisfy all rules, constraints, and choice cardinalities.
+//!
+//! # Key Features
+//!
+//! - **Choice Rules**: `{ atom1; atom2; atom3 } min..max` with cardinality bounds
+//! - **Constraints**: Filter invalid answer sets
+//! - **Guess-and-Check**: Generate candidate answer sets and verify them
+//!
+//! # Algorithm
+//!
+//! 1. Extract choice rules from program
+//! 2. Generate candidate selections (subsets satisfying cardinality bounds)
+//! 3. For each candidate, run stratified evaluation
+//! 4. Verify all constraints hold
+//! 5. Return valid answer sets
+//!
+//! # Example
+//!
+//! ```ignore
+//! let answer_sets = asp_evaluation(&program, &const_env)?;
+//! for answer_set in answer_sets {
+//!     println!("Answer set: {:?}", answer_set.atoms);
+//! }
+//! ```
+
+use crate::ast::{Atom, Program, Statement, Term, Value};
 use crate::constants::ConstantEnv;
 use crate::database::FactDatabase;
 use crate::evaluation::stratified_evaluation_with_constraints;
-use crate::grounding::ground_choice_rule;
 use std::collections::HashSet;
 
 /// An answer set is a stable model - a set of ground atoms

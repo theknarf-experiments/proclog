@@ -1,3 +1,28 @@
+//! Parser for ProcLog programs
+//!
+//! This module implements a parser combinator-based parser using the Chumsky library.
+//! It parses ProcLog programs from text into an AST (Abstract Syntax Tree).
+//!
+//! # Supported Syntax
+//!
+//! - **Facts**: `parent(john, mary).`
+//! - **Rules**: `ancestor(X, Z) :- parent(X, Y), ancestor(Y, Z).`
+//! - **Constraints**: `:- unsafe(X).`
+//! - **Choice Rules**: `{ selected(X) : item(X) } 2.`
+//! - **Probabilistic Facts**: `0.7 :: treasure(X).`
+//! - **Constants**: `#const max_items = 10.`
+//! - **Ranges**: `cell(1..width, 1..height).`
+//! - **Built-ins**: Arithmetic (`X + Y = Z`) and comparisons (`X > 5`)
+//!
+//! # Example
+//!
+//! ```ignore
+//! use proclog::parser::parse_program;
+//!
+//! let program_text = "parent(john, mary). ancestor(X, Z) :- parent(X, Z).";
+//! let program = parse_program(program_text).expect("Parse error");
+//! ```
+
 use chumsky::prelude::*;
 use internment::Intern;
 
@@ -866,7 +891,7 @@ mod tests {
             Statement::ConstDecl(const_decl) => {
                 assert_eq!(const_decl.name, Intern::new("enabled".to_string()));
                 match const_decl.value {
-                    Value::Boolean(true) => {},
+                    Value::Boolean(true) => {}
                     _ => panic!("Expected true boolean value"),
                 }
             }
@@ -883,7 +908,7 @@ mod tests {
             Statement::ConstDecl(const_decl) => {
                 assert_eq!(const_decl.name, Intern::new("disabled".to_string()));
                 match const_decl.value {
-                    Value::Boolean(false) => {},
+                    Value::Boolean(false) => {}
                     _ => panic!("Expected false boolean value"),
                 }
             }

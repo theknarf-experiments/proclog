@@ -1,4 +1,26 @@
-use crate::ast::{Atom, Constraint, Rule};
+//! Datalog evaluation strategies
+//!
+//! This module implements multiple evaluation algorithms for Datalog programs:
+//!
+//! # Evaluation Strategies
+//!
+//! - **Naive Evaluation**: Simple fixed-point iteration (re-evaluates all facts)
+//! - **Semi-Naive Evaluation**: Optimized evaluation using deltas (only new facts)
+//! - **Stratified Evaluation**: Handles negation safely by evaluating in strata
+//!
+//! # Constraint Checking
+//!
+//! Constraints are integrity constraints that must not be violated. They filter
+//! out invalid models during evaluation.
+//!
+//! # Example
+//!
+//! ```ignore
+//! let result = semi_naive_evaluation(&rules, initial_facts);
+//! let result = stratified_evaluation_with_constraints(&rules, &constraints, initial_facts)?;
+//! ```
+
+use crate::ast::{Constraint, Rule};
 use crate::database::FactDatabase;
 use crate::grounding::{ground_rule, ground_rule_semi_naive, satisfy_body};
 use crate::safety::{check_program_safety, SafetyError};
@@ -53,6 +75,7 @@ impl From<StratificationError> for EvaluationError {
 
 /// Naive evaluation: repeatedly apply all rules until fixed point
 /// This is simple but inefficient - it re-evaluates all facts every iteration
+#[allow(dead_code)]
 pub fn naive_evaluation(rules: &[Rule], initial_facts: FactDatabase) -> FactDatabase {
     let mut db = initial_facts;
     let mut changed = true;
@@ -137,6 +160,7 @@ pub fn semi_naive_evaluation(rules: &[Rule], initial_facts: FactDatabase) -> Fac
 }
 
 /// Statistics about evaluation performance
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EvaluationStats {
     pub iterations: usize,
@@ -145,6 +169,7 @@ pub struct EvaluationStats {
 }
 
 /// Instrumented naive evaluation that tracks statistics
+#[allow(dead_code)]
 pub fn naive_evaluation_instrumented(
     rules: &[Rule],
     initial_facts: FactDatabase,
@@ -182,6 +207,7 @@ pub fn naive_evaluation_instrumented(
 }
 
 /// Instrumented semi-naive evaluation that tracks statistics
+#[allow(dead_code)]
 pub fn semi_naive_evaluation_instrumented(
     rules: &[Rule],
     initial_facts: FactDatabase,
@@ -293,6 +319,7 @@ pub fn stratified_evaluation_with_constraints(
 ///
 /// Note: This version doesn't check constraints. Use stratified_evaluation_with_constraints
 /// if you need constraint checking.
+#[allow(dead_code)]
 pub fn stratified_evaluation(
     rules: &[Rule],
     initial_facts: FactDatabase,
@@ -317,7 +344,7 @@ pub fn stratified_evaluation(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{Literal, Term, Value};
+    use crate::ast::{Atom, Literal, Term, Value};
     use internment::Intern;
 
     // Helper functions

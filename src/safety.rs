@@ -1,3 +1,26 @@
+//! Safety checking for Datalog rules
+//!
+//! This module checks that all variables in a rule are "safe" - i.e., they appear
+//! in positive literals in the body. This ensures finite grounding.
+//!
+//! # Safety Rules
+//!
+//! A rule is safe if:
+//! 1. All variables in the head appear in positive body literals
+//! 2. All variables in negative literals appear in positive body literals
+//! 3. All variables in built-in predicates appear in positive body literals
+//!
+//! # Why Safety Matters
+//!
+//! Unsafe rules can have infinite groundings, making evaluation impossible.
+//!
+//! # Example
+//!
+//! ```ignore
+//! // Safe: ancestor(X, Y) :- parent(X, Y).
+//! // Unsafe: bad(X) :- not good(X).  // X appears only in negation
+//! ```
+
 use crate::ast::{Atom, Literal, Rule, Symbol, Term};
 use std::collections::HashSet;
 
@@ -129,6 +152,7 @@ mod tests {
     use internment::Intern;
 
     // Helper functions
+    #[allow(dead_code)]
     fn atom_const(name: &str) -> Term {
         Term::Constant(Value::Atom(Intern::new(name.to_string())))
     }

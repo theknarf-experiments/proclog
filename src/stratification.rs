@@ -1,5 +1,29 @@
-use crate::ast::{Atom, Literal, Rule, Symbol};
-use internment::Intern;
+//! Stratification analysis for programs with negation
+//!
+//! This module analyzes programs to determine if they can be safely evaluated
+//! with negation. A program is stratifiable if there are no cycles through negation.
+//!
+//! # Stratification
+//!
+//! Stratification assigns each predicate to a stratum (layer). Predicates in higher
+//! strata can depend on negated predicates from lower strata, but not vice versa.
+//!
+//! # Algorithm
+//!
+//! 1. Build dependency graph of predicates
+//! 2. Detect negative cycles (cycles through negated edges)
+//! 3. Assign strata using topological sort
+//!
+//! # Example
+//!
+//! ```ignore
+//! let stratification = stratify(&rules)?;
+//! for (stratum, rules_in_stratum) in stratification.iter() {
+//!     // Evaluate rules stratum by stratum
+//! }
+//! ```
+
+use crate::ast::{Literal, Rule, Symbol};
 use std::collections::{HashMap, HashSet};
 
 /// Result of stratification analysis
@@ -213,9 +237,11 @@ pub fn stratify(rules: &[Rule]) -> Result<Stratification, StratificationError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{Term, Value};
+    use crate::ast::{Atom, Term, Value};
+    use internment::Intern;
 
     // Helper functions
+    #[allow(dead_code)]
     fn atom_const(name: &str) -> Term {
         Term::Constant(Value::Atom(Intern::new(name.to_string())))
     }

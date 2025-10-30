@@ -1,3 +1,32 @@
+// Abstract Syntax Tree (AST) definitions for ProcLog
+//!
+//! This module defines the core data structures representing a ProcLog program.
+//! ProcLog combines features from Datalog, Answer Set Programming (ASP), and probabilistic logic.
+//!
+//! # Key Components
+//!
+//! - **Program**: A collection of statements (facts, rules, constraints, etc.)
+//! - **Statement**: Top-level constructs (facts, rules, constraints, probabilistic facts, const decls, choice rules)
+//! - **Atom**: Predicate applied to terms (e.g., `parent(john, mary)`)
+//! - **Term**: Variables, constants, compound terms, or ranges
+//! - **Value**: Constant values (integers, floats, booleans, strings, atoms)
+//! - **Literal**: Positive or negative atoms
+//!
+//! # Example
+//!
+//! ```ignore
+//! // A simple fact: parent(john, mary).
+//! let fact = Fact {
+//!     atom: Atom {
+//!         predicate: Intern::new("parent".to_string()),
+//!         terms: vec![
+//!             Term::Constant(Value::Atom(Intern::new("john".to_string()))),
+//!             Term::Constant(Value::Atom(Intern::new("mary".to_string()))),
+//!         ],
+//!     },
+//! };
+//! ```
+
 use internment::Intern;
 
 /// Interned string for efficient storage and comparison
@@ -151,28 +180,38 @@ impl std::hash::Hash for Value {
 }
 
 impl Program {
+    /// Create a new empty program
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Program {
             statements: Vec::new(),
         }
     }
 
+    /// Add a statement to the program
+    #[allow(dead_code)]
     pub fn add_statement(&mut self, statement: Statement) {
         self.statements.push(statement);
     }
 }
 
 impl Literal {
+    /// Get the underlying atom from a literal
+    #[allow(dead_code)]
     pub fn atom(&self) -> &Atom {
         match self {
             Literal::Positive(atom) | Literal::Negative(atom) => atom,
         }
     }
 
+    /// Check if the literal is positive
+    #[allow(dead_code)]
     pub fn is_positive(&self) -> bool {
         matches!(self, Literal::Positive(_))
     }
 
+    /// Check if the literal is negative
+    #[allow(dead_code)]
     pub fn is_negative(&self) -> bool {
         matches!(self, Literal::Negative(_))
     }

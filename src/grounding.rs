@@ -1,9 +1,29 @@
+//! Rule grounding - generating ground instances of rules
+//!
+//! This module implements the grounding phase of logic programming evaluation.
+//! Grounding replaces variables in rules with concrete values from the database.
+//!
+//! # Key Functions
+//!
+//! - `ground_rule`: Standard grounding for a single rule
+//! - `ground_rule_semi_naive`: Optimized grounding using delta (newly derived facts)
+//! - `satisfy_body`: Find all substitutions that satisfy a rule body
+//! - `ground_choice_rule`: Ground choice rules with their elements
+//!
+//! # Example
+//!
+//! ```ignore
+//! // Given rule: ancestor(X, Z) :- parent(X, Y), parent(Y, Z)
+//! // And facts: parent(a, b), parent(b, c)
+//! // Produces: ancestor(a, c)
+//! let groundings = ground_rule(&rule, &db, &const_env);
+//! ```
+
 use crate::ast::{Atom, ChoiceElement, ChoiceRule, Literal, Rule, Term, Value};
 use crate::builtins;
 use crate::constants::ConstantEnv;
 use crate::database::FactDatabase;
 use crate::unification::Substitution;
-use internment::Intern;
 
 /// Ground a rule: generate all ground instances by substituting variables
 /// For a rule like `ancestor(X, Z) :- parent(X, Y), parent(Y, Z)`
@@ -392,6 +412,7 @@ pub fn ground_choice_element(
 }
 
 /// Ground a choice rule by expanding all its elements
+#[allow(dead_code)]
 pub fn ground_choice_rule(
     choice: &ChoiceRule,
     db: &FactDatabase,
@@ -488,6 +509,7 @@ pub fn ground_choice_rule_split(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use internment::Intern;
 
     // Helper functions
     fn atom_const(name: &str) -> Term {

@@ -1,5 +1,4 @@
 use crate::ast::{Atom, Program, Statement, Symbol, Term, Value};
-use internment::Intern;
 use std::collections::HashMap;
 
 /// Environment storing constant declarations
@@ -69,6 +68,7 @@ impl ConstantEnv {
     }
 
     /// Substitute constants in an atom
+    #[allow(dead_code)]
     pub fn substitute_atom(&self, atom: &Atom) -> Atom {
         Atom {
             predicate: atom.predicate.clone(),
@@ -81,6 +81,7 @@ impl ConstantEnv {
 mod tests {
     use super::*;
     use crate::ast::ConstDecl;
+    use internment::Intern;
 
     fn make_const_decl(name: &str, value: i64) -> ConstDecl {
         ConstDecl {
@@ -251,7 +252,10 @@ mod tests {
     fn test_integration_multiple_const_types_in_atoms() {
         let mut env = ConstantEnv::new();
         env.define(Intern::new("max_health".to_string()), Value::Integer(100));
-        env.define(Intern::new("damage_multiplier".to_string()), Value::Float(1.5));
+        env.define(
+            Intern::new("damage_multiplier".to_string()),
+            Value::Float(1.5),
+        );
         env.define(Intern::new("is_enabled".to_string()), Value::Boolean(true));
         env.define(
             Intern::new("default_weapon".to_string()),
@@ -322,7 +326,10 @@ mod tests {
     #[test]
     fn test_integration_mixed_constants_and_regular_values() {
         let mut env = ConstantEnv::new();
-        env.define(Intern::new("default_port".to_string()), Value::Integer(8080));
+        env.define(
+            Intern::new("default_port".to_string()),
+            Value::Integer(8080),
+        );
         env.define(
             Intern::new("default_host".to_string()),
             Value::String(Intern::new("localhost".to_string())),
@@ -383,7 +390,10 @@ mod tests {
 
         let env = ConstantEnv::from_program(&program);
 
-        assert_eq!(env.get_int(&Intern::new("max_players".to_string())), Some(4));
+        assert_eq!(
+            env.get_int(&Intern::new("max_players".to_string())),
+            Some(4)
+        );
         assert_eq!(
             env.get(&Intern::new("gravity".to_string())),
             Some(&Value::Float(9.81))

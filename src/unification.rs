@@ -1,5 +1,22 @@
-use crate::ast::{Atom, Symbol, Term, Value};
-use internment::Intern;
+//! Unification algorithm (Robinson's unification)
+//!
+//! This module implements first-order unification, which finds substitutions
+//! that make two terms equal. This is a core operation in logic programming.
+//!
+//! # Algorithm
+//!
+//! Implements Robinson's unification algorithm with occurs check to prevent
+//! infinite structures.
+//!
+//! # Example
+//!
+//! ```ignore
+//! // Unify parent(X, mary) with parent(john, Y)
+//! // Result: X=john, Y=mary
+//! let sub = unify_atoms(&pattern1, &pattern2);
+//! ```
+
+use crate::ast::{Atom, Symbol, Term};
 use std::collections::HashMap;
 
 /// A substitution maps variables to terms
@@ -26,16 +43,19 @@ impl Substitution {
     }
 
     /// Check if a variable is bound
+    #[allow(dead_code)]
     pub fn contains(&self, var: &Symbol) -> bool {
         self.bindings.contains_key(var)
     }
 
     /// Get the number of bindings
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.bindings.len()
     }
 
     /// Check if substitution is empty
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.bindings.is_empty()
     }
@@ -148,6 +168,8 @@ pub fn unify_atoms(atom1: &Atom, atom2: &Atom, subst: &mut Substitution) -> bool
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast::Value;
+    use internment::Intern;
 
     // Helper functions for creating terms in tests
     fn var(name: &str) -> Term {

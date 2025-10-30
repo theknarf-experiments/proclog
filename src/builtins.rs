@@ -1,18 +1,24 @@
-// Built-in predicates and arithmetic evaluation
+//! Built-in predicates and arithmetic evaluation
+//!
+//! This module handles built-in predicates like arithmetic operations and comparisons.
+//! Built-ins are special predicates evaluated during grounding rather than via rules.
+//!
+//! # Supported Built-ins
+//!
+//! - **Arithmetic**: `+`, `-`, `*`, `/`, `mod`
+//! - **Comparisons**: `=`, `!=`, `\=`, `<`, `>`, `<=`, `>=`
+//!
+//! # Usage
+//!
+//! Built-ins can appear in rule bodies:
+//! ```ignore
+//! // age(X, A), A > 18, Result = A + 1
+//! ```
+//!
+//! During grounding, built-ins are evaluated to filter or compute values.
 
 use crate::ast::{Atom, Term, Value};
 use crate::unification::Substitution;
-use internment::Intern;
-
-/// Arithmetic operators
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum ArithOp {
-    Add, // +
-    Sub, // -
-    Mul, // *
-    Div, // /
-    Mod, // mod
-}
 
 /// Comparison operators
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -180,6 +186,7 @@ pub fn parse_builtin(atom: &Atom) -> Option<BuiltIn> {
 mod tests {
     use super::*;
     use crate::ast::Term;
+    use internment::Intern;
 
     fn int(n: i64) -> Term {
         Term::Constant(Value::Integer(n))
