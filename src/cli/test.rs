@@ -1,31 +1,70 @@
 use crate::{ast, parser, test_runner};
 use crate::{COLOR_CYAN, COLOR_GREEN, COLOR_RED, COLOR_RESET, COLOR_YELLOW};
-use notify::{recommended_watcher, Event, EventKind, RecursiveMode, Watcher};
+use notify::{recommended_watcher, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-pub fn run(filename: &str, watch: bool) {
-    let path = PathBuf::from(filename);
-
-    if !path.exists() {
-        eprintln!("File '{}' not found.", filename);
+pub fn run(files: &[PathBuf], watch: bool) {
+    if files.is_empty() {
+        eprintln!("No test files provided.");
         std::process::exit(1);
     }
 
-    let last_success = run_tests_from_file(&path);
+    #[derive(Clone)]
+    struct InputFile {
+        canonical: PathBuf,
+        display: String,
+    }
+
+    let mut seen = HashSet::new();
+    let mut inputs = Vec::new();
+
+    for file in files {
+        let path = file.clone();
+        if !path.exists() {
+            eprintln!("File '{}' not found.", path.display());
+            std::process::exit(1);
+        }
+
+        let canonical = path.canonicalize().unwrap_or(path.clone());
+        if seen.insert(canonical.clone()) {
+            inputs.push(InputFile {
+                canonical,
+                display: path.display().to_string(),
+            });
+        }
+    }
+
+    if inputs.is_empty() {
+        eprintln!("No valid test files provided.");
+        std::process::exit(1);
+    }
+
+    let mut overall_success = true;
+    for (idx, file) in inputs.iter().enumerate() {
+        let success = run_tests_from_file(&file.canonical, &file.display);
+        overall_success &= success;
+        if idx < inputs.len() - 1 {
+            println!();
+        }
+    }
 
     if watch {
+        let file_list = inputs
+            .iter()
+            .map(|f| f.display.clone())
+            .collect::<Vec<_>>()
+            .join(", ");
         println!(
-            "{}Watching '{}' for changes... Press Ctrl+C to stop.{}",
-            COLOR_CYAN,
-            path.display(),
-            COLOR_RESET
+            "{}Watching {} for changes... Press Ctrl+C to stop.{}",
+            COLOR_CYAN, file_list, COLOR_RESET
         );
 
         let (tx, rx) = mpsc::channel();
-        let mut watcher = match recommended_watcher(move |res| {
+        let mut watcher: RecommendedWatcher = match recommended_watcher(move |res| {
             let _ = tx.send(res);
         }) {
             Ok(w) => w,
@@ -35,9 +74,10 @@ pub fn run(filename: &str, watch: bool) {
             }
         };
 
-        if let Err(err) = watcher.watch(&path, RecursiveMode::NonRecursive) {
-            eprintln!("Failed to watch '{}': {}", path.display(), err);
-            std::process::exit(1);
+        for file in &inputs {
+            if let Err(err) = watcher.watch(&file.canonical, RecursiveMode::NonRecursive) {
+                eprintln!("Failed to watch '{}': {}", file.display, err);
+            }
         }
 
         let mut last_event = Instant::now();
@@ -48,10 +88,16 @@ pub fn run(filename: &str, watch: bool) {
                     {
                         last_event = Instant::now();
                         println!(
-                            "\n{}Detected change, re-running tests...{}",
+                            "
+{}Detected change, re-running tests...{}",
                             COLOR_CYAN, COLOR_RESET
                         );
-                        let _ = run_tests_from_file(&path);
+                        for (idx, file) in inputs.iter().enumerate() {
+                            let _ = run_tests_from_file(&file.canonical, &file.display);
+                            if idx < inputs.len() - 1 {
+                                println!();
+                            }
+                        }
                     }
                 }
                 Err(err) => {
@@ -59,18 +105,18 @@ pub fn run(filename: &str, watch: bool) {
                 }
             }
         }
-    } else if !last_success {
+    } else if !overall_success {
         std::process::exit(1);
     }
 }
 
-fn run_tests_from_file(path: &Path) -> bool {
-    let filename = path.display().to_string();
+fn run_tests_from_file(path: &Path, display_name: &str) -> bool {
+    let identifier = display_name;
 
     let content = match fs::read_to_string(path) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("Error reading file '{}': {}", filename, e);
+            eprintln!("Error reading file '{}': {}", identifier, e);
             return false;
         }
     };
@@ -78,7 +124,7 @@ fn run_tests_from_file(path: &Path) -> bool {
     let program = match parser::parse_program(&content) {
         Ok(p) => p,
         Err(errors) => {
-            eprintln!("Parse errors in '{}':", filename);
+            eprintln!("Parse errors in '{}':", identifier);
             for error in errors {
                 eprintln!("  {:?}", error);
             }
@@ -98,7 +144,7 @@ fn run_tests_from_file(path: &Path) -> bool {
     if test_blocks.is_empty() {
         println!(
             "{}No test blocks found in '{}'{}",
-            COLOR_YELLOW, filename, COLOR_RESET
+            COLOR_YELLOW, identifier, COLOR_RESET
         );
         return true;
     }
@@ -107,7 +153,7 @@ fn run_tests_from_file(path: &Path) -> bool {
         "{}Running {} test blocks from '{}'...{}",
         COLOR_CYAN,
         test_blocks.len(),
-        filename,
+        identifier,
         COLOR_RESET
     );
 

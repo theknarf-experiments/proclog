@@ -52,9 +52,10 @@ struct Cli {
 enum Commands {
     /// Run tests from a ProcLog file
     Test {
-        /// Path to the ProcLog file containing test blocks
-        filename: String,
-        /// Watch the file for changes and re-run tests automatically
+        /// One or more ProcLog files containing test blocks
+        #[arg(value_name = "FILE", required = true)]
+        files: Vec<std::path::PathBuf>,
+        /// Watch the file(s) for changes and re-run tests automatically
         #[arg(long)]
         watch: bool,
     },
@@ -70,8 +71,8 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Test { filename, watch } => {
-            cli::test::run(&filename, watch);
+        Commands::Test { files, watch } => {
+            cli::test::run(&files, watch);
         }
         Commands::Repl { input } => {
             if let Err(e) = cli::repl::run(input.as_deref()) {
