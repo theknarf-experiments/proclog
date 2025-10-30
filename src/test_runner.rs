@@ -73,12 +73,8 @@ pub fn run_test_block(base_statements: &[Statement], test_block: &TestBlock) -> 
                 .body
                 .iter()
                 .map(|lit| match lit {
-                    Literal::Positive(atom) => {
-                        Literal::Positive(const_env.substitute_atom(atom))
-                    }
-                    Literal::Negative(atom) => {
-                        Literal::Negative(const_env.substitute_atom(atom))
-                    }
+                    Literal::Positive(atom) => Literal::Positive(const_env.substitute_atom(atom)),
+                    Literal::Negative(atom) => Literal::Negative(const_env.substitute_atom(atom)),
                 })
                 .collect();
 

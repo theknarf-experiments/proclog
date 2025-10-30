@@ -54,6 +54,9 @@ enum Commands {
     Test {
         /// Path to the ProcLog file containing test blocks
         filename: String,
+        /// Watch the file for changes and re-run tests automatically
+        #[arg(long)]
+        watch: bool,
     },
     /// Start the interactive ProcLog REPL
     Repl {
@@ -67,8 +70,8 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Test { filename } => {
-            cli::test::run(&filename);
+        Commands::Test { filename, watch } => {
+            cli::test::run(&filename, watch);
         }
         Commands::Repl { input } => {
             if let Err(e) = cli::repl::run(input.as_deref()) {

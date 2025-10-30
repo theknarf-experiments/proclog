@@ -10,5 +10,6 @@ ariadne = "0.4"
 crossterm = "0.27"
 ratatui = { path = "vendor/ratatui" }
 clap = { version = "4.5", features = ["derive"] }
+notify = "6"
 
 [dev-dependencies]
