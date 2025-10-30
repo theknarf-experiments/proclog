@@ -77,6 +77,7 @@ impl FactDatabase {
     }
 
     /// Get all facts with a specific predicate
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn get_by_predicate(&self, predicate: &Symbol) -> Vec<&Atom> {
         if let Some(facts) = self.facts_by_predicate.get(predicate) {
             facts.iter().collect()
@@ -86,6 +87,7 @@ impl FactDatabase {
     }
 
     /// Get all facts in the database
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn all_facts(&self) -> Vec<&Atom> {
         self.facts_by_predicate
             .values()

@@ -33,6 +33,7 @@ use crate::evaluation::stratified_evaluation_with_constraints;
 use std::collections::HashSet;
 
 /// An answer set is a stable model - a set of ground atoms
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone)]
 pub struct AnswerSet {
     pub atoms: HashSet<Atom>,
@@ -45,6 +46,7 @@ pub struct AnswerSet {
 /// - An atom that refers to a constant name: Term::Constant(Value::Atom(name))
 ///
 /// Returns Some(i64) if the term can be resolved, None otherwise
+#[cfg_attr(not(test), allow(dead_code))]
 fn resolve_bound(bound: &Term, const_env: &ConstantEnv) -> Option<i64> {
     match bound {
         Term::Constant(Value::Integer(n)) => Some(*n),
@@ -54,6 +56,7 @@ fn resolve_bound(bound: &Term, const_env: &ConstantEnv) -> Option<i64> {
 }
 
 /// Generate all subsets of a given size range
+#[cfg_attr(not(test), allow(dead_code))]
 fn generate_subsets<T: Clone>(items: &[T], min_size: usize, max_size: usize) -> Vec<Vec<T>> {
     let mut result = Vec::new();
     let n = items.len();
@@ -82,6 +85,7 @@ fn generate_subsets<T: Clone>(items: &[T], min_size: usize, max_size: usize) -> 
     result
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn generate_subsets_recursive<T: Clone>(
     items: &[T],
     min_size: usize,
@@ -123,6 +127,7 @@ fn generate_subsets_recursive<T: Clone>(
 ///
 /// Given: [[a, b], [c]]  and  [[x], [y, z]]
 /// Returns: [[a, b, x], [a, b, y, z], [c, x], [c, y, z]]
+#[cfg_attr(not(test), allow(dead_code))]
 fn cartesian_product_choice_subsets(choice_subsets: &[Vec<Vec<Atom>>]) -> Vec<Vec<Atom>> {
     if choice_subsets.is_empty() {
         return vec![vec![]];
@@ -161,6 +166,7 @@ fn cartesian_product_choice_subsets(choice_subsets: &[Vec<Vec<Atom>>]) -> Vec<Ve
 }
 
 /// Evaluate a program with choice rules using generate-and-test
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn asp_evaluation(program: &Program) -> Vec<AnswerSet> {
     // Extract components
     let const_env = ConstantEnv::from_program(program);

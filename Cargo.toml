@@ -7,5 +7,8 @@ edition = "2021"
 chumsky = "0.9"
 internment = "0.8"
 ariadne = "0.4"
+crossterm = "0.27"
+ratatui = { path = "vendor/ratatui" }
+clap = { version = "4.5", features = ["derive"] }
 
 [dev-dependencies]

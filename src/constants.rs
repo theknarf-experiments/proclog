@@ -25,6 +25,7 @@ impl ConstantEnv {
     }
 
     /// Get an integer value from a constant (for backwards compatibility with code expecting integers)
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn get_int(&self, name: &Symbol) -> Option<i64> {
         self.constants.get(name).and_then(|v| match v {
             Value::Integer(n) => Some(*n),
@@ -33,6 +34,7 @@ impl ConstantEnv {
     }
 
     /// Build a constant environment from a program's #const declarations
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn from_program(program: &Program) -> Self {
         let mut env = ConstantEnv::new();
 

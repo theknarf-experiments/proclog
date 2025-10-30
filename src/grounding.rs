@@ -499,6 +499,7 @@ pub fn ground_choice_rule(
 /// % [ [has_weapon(alice, sword), has_weapon(alice, bow)],
 /// %   [has_weapon(bob, sword), has_weapon(bob, bow)] ]
 /// ```
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn ground_choice_rule_split(
     choice: &ChoiceRule,
     db: &FactDatabase,
