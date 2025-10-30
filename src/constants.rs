@@ -45,6 +45,19 @@ impl ConstantEnv {
         env
     }
 
+    /// Build a constant environment from a list of statements
+    pub fn from_statements(statements: &[Statement]) -> Self {
+        let mut env = ConstantEnv::new();
+
+        for statement in statements {
+            if let Statement::ConstDecl(const_decl) = statement {
+                env.define(const_decl.name.clone(), const_decl.value.clone());
+            }
+        }
+
+        env
+    }
+
     /// Substitute constants in a term
     /// If a term is an atom (constant) that matches a const name, replace with its value
     pub fn substitute_term(&self, term: &Term) -> Term {

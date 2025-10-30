@@ -9,6 +9,7 @@ mod parser;
 mod query;
 mod safety;
 mod stratification;
+mod test_runner;
 mod unification;
 
 #[cfg(test)]
@@ -24,16 +25,124 @@ mod choice_constant_bounds_tests;
 mod query_integration_tests;
 
 fn main() {
-    println!("ProcLog - Datalog for Procedural Generation\n");
-    println!("============================================\n");
+    let args: Vec<String> = std::env::args().collect();
 
-    demo_evaluation();
-    println!("\n");
-    demo_asp();
-    println!("\n");
-    demo_dungeon_generator();
-    println!("\n");
-    demo_datatypes();
+    if args.len() > 1 {
+        match args[1].as_str() {
+            "test" => {
+                if args.len() < 3 {
+                    eprintln!("Usage: {} test <filename>", args[0]);
+                    std::process::exit(1);
+                }
+                let filename = &args[2];
+                run_tests(filename);
+            }
+            "--help" | "-h" => {
+                print_help(&args[0]);
+            }
+            _ => {
+                eprintln!("Unknown command: {}", args[1]);
+                eprintln!("Run {} --help for usage information", args[0]);
+                std::process::exit(1);
+            }
+        }
+    } else {
+        // No arguments - run demos
+        println!("ProcLog - Datalog for Procedural Generation\n");
+        println!("============================================\n");
+
+        demo_evaluation();
+        println!("\n");
+        demo_asp();
+        println!("\n");
+        demo_dungeon_generator();
+        println!("\n");
+        demo_datatypes();
+    }
+}
+
+fn print_help(program_name: &str) {
+    println!("ProcLog - Datalog for Procedural Generation\n");
+    println!("Usage:");
+    println!("  {}              Run demo programs", program_name);
+    println!("  {} test <file>  Run tests from a ProcLog file", program_name);
+    println!("  {} --help       Show this help message", program_name);
+}
+
+fn run_tests(filename: &str) {
+    use std::fs;
+
+    // Read the file
+    let content = match fs::read_to_string(filename) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Error reading file '{}': {}", filename, e);
+            std::process::exit(1);
+        }
+    };
+
+    // Parse the file
+    let program = match parser::parse_program(&content) {
+        Ok(p) => p,
+        Err(errors) => {
+            eprintln!("Parse errors in '{}':", filename);
+            for error in errors {
+                eprintln!("  {:?}", error);
+            }
+            std::process::exit(1);
+        }
+    };
+
+    // Extract test blocks
+    let mut test_blocks = Vec::new();
+    for statement in &program.statements {
+        if let ast::Statement::Test(test_block) = statement {
+            test_blocks.push(test_block);
+        }
+    }
+
+    if test_blocks.is_empty() {
+        println!("No test blocks found in '{}'", filename);
+        return;
+    }
+
+    println!("Running {} test blocks from '{}'...\n", test_blocks.len(), filename);
+
+    // Run each test block
+    let mut total_passed = 0;
+    let mut total_failed = 0;
+
+    for test_block in test_blocks {
+        let result = test_runner::run_test_block(test_block);
+
+        // Print results
+        println!("{}", result.summary());
+
+        if result.passed {
+            total_passed += 1;
+        } else {
+            total_failed += 1;
+
+            // Print details of failures
+            for case_result in &result.case_results {
+                if !case_result.passed {
+                    println!("  {}", case_result.message);
+                }
+            }
+        }
+        println!();
+    }
+
+    // Print overall summary
+    println!("=====================================");
+    println!("Test Summary:");
+    println!("  Passed: {}", total_passed);
+    println!("  Failed: {}", total_failed);
+    println!("  Total:  {}", total_passed + total_failed);
+
+    if total_failed > 0 {
+        std::process::exit(1);
+    }
 }
 
 fn demo_evaluation() {
@@ -340,6 +449,15 @@ fn demo_datatypes() {
                             } else {
                                 " with body"
                             }
+                        );
+                    }
+                    ast::Statement::Test(test_block) => {
+                        println!(
+                            "  {}. Test Block: \"{}\" with {} statements and {} test cases",
+                            i + 1,
+                            test_block.name,
+                            test_block.statements.len(),
+                            test_block.test_cases.len()
                         );
                     }
                 }

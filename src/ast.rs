@@ -46,6 +46,7 @@ pub enum Statement {
     ProbFact(ProbFact),
     ConstDecl(ConstDecl),
     ChoiceRule(ChoiceRule),
+    Test(TestBlock),
 }
 
 /// A fact is simply an atom: `parent(john, mary).`
@@ -101,6 +102,22 @@ pub struct ChoiceElement {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Query {
     pub body: Vec<Literal>,
+}
+
+/// A test block: `#test "name" { facts, rules, queries with assertions }`
+#[derive(Debug, Clone, PartialEq)]
+pub struct TestBlock {
+    pub name: String,
+    pub statements: Vec<Statement>, // Facts, rules, const decls for this test
+    pub test_cases: Vec<TestCase>,
+}
+
+/// A test case: query with positive and negative assertions
+#[derive(Debug, Clone, PartialEq)]
+pub struct TestCase {
+    pub query: Query,
+    pub positive_assertions: Vec<Atom>, // These should be in results
+    pub negative_assertions: Vec<Atom>, // These should NOT be in results
 }
 
 /// A literal is either a positive or negative atom

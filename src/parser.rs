@@ -386,6 +386,101 @@ fn const_decl() -> impl Parser<char, Statement, Error = ParseError> + Clone {
         .labelled("constant declaration")
 }
 
+/// Parse a test assertion: + atom. or - atom.
+fn test_assertion() -> impl Parser<char, (bool, Atom), Error = ParseError> + Clone {
+    choice((
+        just('+').padded().to(true),
+        just('-').padded().to(false),
+    ))
+    .then(atom())
+    .then_ignore(just('.').padded())
+    .labelled("test assertion")
+}
+
+/// Parse a test case: query followed by assertions
+fn test_case() -> impl Parser<char, TestCase, Error = ParseError> + Clone {
+    // Parse query: ?- body.
+    let query_body = just('?')
+        .then_ignore(just('-').padded())
+        .ignore_then(
+            literal()
+                .separated_by(just(',').padded())
+                .at_least(1)
+                .collect::<Vec<_>>(),
+        )
+        .then_ignore(just('.').padded());
+
+    query_body
+        .then(test_assertion().repeated().collect::<Vec<_>>())
+        .map(|(body, assertions)| {
+            let mut positive_assertions = Vec::new();
+            let mut negative_assertions = Vec::new();
+
+            for (is_positive, atom) in assertions {
+                if is_positive {
+                    positive_assertions.push(atom);
+                } else {
+                    negative_assertions.push(atom);
+                }
+            }
+
+            TestCase {
+                query: Query { body },
+                positive_assertions,
+                negative_assertions,
+            }
+        })
+        .labelled("test case")
+}
+
+/// Parse a test block: #test "name" { statements and test cases }
+fn test_block() -> impl Parser<char, Statement, Error = ParseError> + Clone {
+    // Test block content item can be either a statement or a test case
+    let test_item = choice((
+        // Try test case first (starts with ?-)
+        test_case().map(|tc| (None, Some(tc))),
+        // Then try regular statements (but not other test blocks)
+        choice((
+            const_decl(),
+            prob_fact(),
+            constraint(),
+            rule(),
+            fact(),
+        ))
+        .map(|stmt| (Some(stmt), None)),
+    ));
+
+    just('#')
+        .then_ignore(text::keyword("test").padded())
+        .ignore_then(string_literal())
+        .then(
+            test_item
+                .repeated()
+                .collect::<Vec<_>>()
+                .delimited_by(just('{').padded(), just('}').padded()),
+        )
+        .map(|(name, items)| {
+            let mut statements = Vec::new();
+            let mut test_cases = Vec::new();
+
+            for (stmt_opt, test_opt) in items {
+                if let Some(stmt) = stmt_opt {
+                    statements.push(stmt);
+                }
+                if let Some(test) = test_opt {
+                    test_cases.push(test);
+                }
+            }
+
+            Statement::Test(TestBlock {
+                name,
+                statements,
+                test_cases,
+            })
+        })
+        .labelled("test block")
+}
+
 /// Parse a choice rule: { atom1; atom2 } or 1 { atom1; atom2 } 2 :- body.
 fn choice_rule() -> impl Parser<char, Statement, Error = ParseError> + Clone {
     // Optional lower bound - can be integer or identifier (constant name)
@@ -456,9 +551,10 @@ fn choice_rule() -> impl Parser<char, Statement, Error = ParseError> + Clone {
 /// Parse a statement
 fn statement() -> impl Parser<char, Statement, Error = ParseError> + Clone {
     choice((
-        const_decl(), // Try #const first (distinctive prefix)
+        test_block(),   // Try #test first (distinctive prefix)
+        const_decl(),   // Try #const (distinctive prefix)
         prob_fact(),
-        choice_rule(), // Try choice rules (distinctive { prefix)
+        choice_rule(),  // Try choice rules (distinctive { prefix)
         constraint(),
         rule(),
         fact(),
@@ -1724,5 +1820,157 @@ mod tests {
         assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
         let query = result.unwrap();
         assert_eq!(query.body.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_simple_test_block() {
+        let input = r#"
+            #test "basic test" {
+                parent(john, mary).
+
+                ?- parent(john, mary).
+                + true.
+            }
+        "#;
+        let result = parse_program(input);
+        assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+        let program = result.unwrap();
+        assert_eq!(program.statements.len(), 1);
+
+        match &program.statements[0] {
+            Statement::Test(test_block) => {
+                assert_eq!(test_block.name, "basic test");
+                assert_eq!(test_block.statements.len(), 1);
+                assert_eq!(test_block.test_cases.len(), 1);
+
+                // Check test case
+                let test_case = &test_block.test_cases[0];
+                assert_eq!(test_case.query.body.len(), 1);
+                assert_eq!(test_case.positive_assertions.len(), 1);
+                assert_eq!(test_case.negative_assertions.len(), 0);
+            }
+            _ => panic!("Expected test block"),
+        }
+    }
+
+    #[test]
+    fn test_parse_test_block_with_rules() {
+        let input = r#"
+            #test "transitive closure" {
+                edge(a, b).
+                edge(b, c).
+                path(X, Y) :- edge(X, Y).
+                path(X, Z) :- path(X, Y), edge(Y, Z).
+
+                ?- path(a, c).
+                + path(a, c).
+                - path(c, a).
+            }
+        "#;
+        let result = parse_program(input);
+        assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+        let program = result.unwrap();
+        match &program.statements[0] {
+            Statement::Test(test_block) => {
+                assert_eq!(test_block.name, "transitive closure");
+                assert_eq!(test_block.statements.len(), 4); // 2 facts + 2 rules
+                assert_eq!(test_block.test_cases.len(), 1);
+
+                let test_case = &test_block.test_cases[0];
+                assert_eq!(test_case.positive_assertions.len(), 1);
+                assert_eq!(test_case.negative_assertions.len(), 1);
+            }
+            _ => panic!("Expected test block"),
+        }
+    }
+
+    #[test]
+    fn test_parse_test_block_multiple_queries() {
+        let input = r#"
+            #test "multiple queries" {
+                value(1).
+                value(2).
+
+                ?- value(1).
+                + true.
+
+                ?- value(X).
+                + value(1).
+                + value(2).
+                - value(3).
+            }
+        "#;
+        let result = parse_program(input);
+        assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+        let program = result.unwrap();
+        match &program.statements[0] {
+            Statement::Test(test_block) => {
+                assert_eq!(test_block.test_cases.len(), 2);
+
+                // First query
+                assert_eq!(test_block.test_cases[0].positive_assertions.len(), 1);
+
+                // Second query
+                assert_eq!(test_block.test_cases[1].positive_assertions.len(), 2);
+                assert_eq!(test_block.test_cases[1].negative_assertions.len(), 1);
+            }
+            _ => panic!("Expected test block"),
+        }
+    }
+
+    #[test]
+    fn test_parse_test_block_with_constants() {
+        let input = r#"
+            #test "with constants" {
+                #const max_val = 10.
+                limit(max_val).
+
+                ?- limit(10).
+                + true.
+            }
+        "#;
+        let result = parse_program(input);
+        assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+        let program = result.unwrap();
+        match &program.statements[0] {
+            Statement::Test(test_block) => {
+                assert_eq!(test_block.statements.len(), 2); // const decl + fact
+            }
+            _ => panic!("Expected test block"),
+        }
+    }
+
+    #[test]
+    fn test_parse_multiple_test_blocks() {
+        let input = r#"
+            #test "test 1" {
+                a(1).
+                ?- a(1).
+                + true.
+            }
+
+            #test "test 2" {
+                b(2).
+                ?- b(2).
+                + true.
+            }
+        "#;
+        let result = parse_program(input);
+        assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+        let program = result.unwrap();
+        assert_eq!(program.statements.len(), 2);
+
+        match (&program.statements[0], &program.statements[1]) {
+            (Statement::Test(test1), Statement::Test(test2)) => {
+                assert_eq!(test1.name, "test 1");
+                assert_eq!(test2.name, "test 2");
+            }
+            _ => panic!("Expected two test blocks"),
+        }
     }
 }
