@@ -41,6 +41,7 @@ pub fn evaluate_query(query: &Query, db: &FactDatabase) -> QueryResult {
 /// Extract variable bindings from a substitution for a set of variables
 ///
 /// Returns a mapping from variable names to their bound values (as strings)
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn extract_bindings(
     subst: &Substitution,
     variables: &HashSet<Symbol>,
@@ -56,6 +57,7 @@ pub fn extract_bindings(
 }
 
 /// Extract all variables from a query
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn query_variables(query: &Query) -> HashSet<Symbol> {
     use crate::ast::Term;
 

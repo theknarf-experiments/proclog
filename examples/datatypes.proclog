@@ -98,3 +98,28 @@ valid_attack(Attacker, Target, Damage, Critical) :-
 :- health(Player, H), H < 0.                      % Health can't be negative
 :- level(Player, L), L > 100.                     % Max level is 100
 :- position(Entity, coord(X, Y, Z)), not valid_coord(X, Y, Z).
+
+#test "datatype coverage" {
+    % Integer, float, boolean, string, atom, compound usage
+    level(1).
+    pi(3.14159).
+    is_active(player1, true).
+    name(player1, "Alice").
+    inventory(player1, item(sword, 10, 5.5)).
+
+    ?- level(1).
+    + true.
+
+    ?- name(player1, "Alice").
+    + true.
+
+    ?- inventory(player1, item(sword, Damage, Weight)).
+    + inventory(player1, item(sword, 10, 5.5)).
+
+    % Rule with anonymous variables should succeed
+    can_move(Player) :- position(Player, _x, _y), is_active(Player, true).
+    position(player1, 10, 20).
+
+    ?- can_move(player1).
+    + true.
+}

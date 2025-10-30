@@ -25,3 +25,19 @@ has_key(Player, treasure_room) :- found_key(Player, treasure_key), in_room(Playe
 :- room(R, treasure), not reachable(entrance, R).
 :- room(R, boss), not has_key(player, boss_key).
 :- room(R, _), not reachable(entrance, R).
+
+#test "dungeon reachability" {
+    entrance(room_a).
+    adjacent(room_a, room_b).
+    adjacent(room_b, room_c).
+
+    connected(R1, R2) :- adjacent(R1, R2).
+    reachable(R1, R2) :- connected(R1, R2).
+    reachable(R1, R3) :- reachable(R1, R2), connected(R2, R3).
+
+    ?- reachable(room_a, room_c).
+    + true.
+
+    ?- reachable(room_c, room_a).
+    - true.
+}

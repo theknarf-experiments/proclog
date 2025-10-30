@@ -602,6 +602,7 @@ pub fn parse_program(input: &str) -> Result<Program, Vec<ParseError>> {
 }
 
 /// Parse a query: ?- literal1, literal2, ..., literalN.
+#[cfg_attr(not(test), allow(dead_code))]
 fn query() -> impl Parser<char, Query, Error = ParseError> + Clone {
     just('?')
         .then_ignore(just('-').padded())
@@ -617,6 +618,7 @@ fn query() -> impl Parser<char, Query, Error = ParseError> + Clone {
 }
 
 /// Helper function to parse a query
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn parse_query(input: &str) -> Result<Query, Vec<ParseError>> {
     query().parse(input)
 }

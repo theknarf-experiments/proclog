@@ -17,10 +17,7 @@ use std::collections::{HashMap, HashSet};
 #[derive(Debug, Clone)]
 pub struct TestCaseResult {
     pub passed: bool,
-    pub query_text: String,
     pub message: String,
-    pub positive_failures: Vec<Atom>, // Positive assertions that weren't found
-    pub negative_failures: Vec<Atom>, // Negative assertions that were found
 }
 
 /// Result of running an entire test block
@@ -34,11 +31,6 @@ pub struct TestResult {
 }
 
 impl TestResult {
-    /// Check if all test cases passed
-    pub fn all_passed(&self) -> bool {
-        self.passed
-    }
-
     /// Get a summary message
     pub fn summary(&self) -> String {
         if self.passed {
@@ -193,13 +185,7 @@ fn run_test_case(
         msg
     };
 
-    TestCaseResult {
-        passed,
-        query_text,
-        message,
-        positive_failures,
-        negative_failures,
-    }
+    TestCaseResult { passed, message }
 }
 
 /// Evaluate a query against both derived facts and local rules
