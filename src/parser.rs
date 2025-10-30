@@ -462,7 +462,7 @@ fn test_block() -> impl Parser<char, Statement, Error = ParseError> + Clone {
         // Try test case first (starts with ?-)
         test_case().map(|tc| (None, Some(tc))),
         // Then try regular statements (but not other test blocks)
-        choice((const_decl(), prob_fact(), constraint(), rule(), fact()))
+        choice((const_decl(), prob_fact(), choice_rule(), constraint(), rule(), fact()))
             .map(|stmt| (Some(stmt), None)),
     ))
     .padded_by(spacing());

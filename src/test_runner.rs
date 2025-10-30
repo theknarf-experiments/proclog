@@ -3,7 +3,8 @@
 //! This module implements functionality to run ProcLog tests defined with `#test` blocks.
 //! Each test block contains facts, rules, and queries with assertions to verify behavior.
 
-use crate::ast::{Atom, Literal, Rule, Statement, Symbol, Term, TestBlock, TestCase};
+use crate::ast::{Atom, ChoiceRule, Constraint, Literal, Rule, Statement, Symbol, Term, TestBlock, TestCase};
+use crate::asp::{asp_evaluation, AnswerSet};
 use crate::builtins;
 use crate::constants::ConstantEnv;
 use crate::database::FactDatabase;
@@ -57,9 +58,13 @@ pub fn run_test_block(base_statements: &[Statement], test_block: &TestBlock) -> 
         }
     }
 
-    // Build initial database and rules from base statements + test statements
+    // Build initial database, rules, and ASP components from base statements + test statements
     let mut initial_facts = FactDatabase::new();
     let mut rules = Vec::new();
+    let mut constraints = Vec::new();
+    let mut choice_rules = Vec::new();
+    let mut prob_facts = Vec::new();
+    let mut has_asp_statements = false;
 
     let mut process_statement = |statement: &Statement| match statement {
         Statement::Fact(fact) => {
@@ -83,14 +88,65 @@ pub fn run_test_block(base_statements: &[Statement], test_block: &TestBlock) -> 
                 body: substituted_body,
             });
         }
+        Statement::Constraint(constraint) => {
+            // Substitute constants in constraint body
+            let substituted_body: Vec<_> = constraint
+                .body
+                .iter()
+                .map(|lit| match lit {
+                    Literal::Positive(atom) => Literal::Positive(const_env.substitute_atom(atom)),
+                    Literal::Negative(atom) => Literal::Negative(const_env.substitute_atom(atom)),
+                })
+                .collect();
+
+            constraints.push(Constraint {
+                body: substituted_body,
+            });
+            // Constraints alone don't make it ASP - need choice rules too
+            // (Constraints can be handled by regular Datalog evaluation)
+        }
+        Statement::ChoiceRule(choice) => {
+            // Substitute constants in choice rule bounds and elements
+            let substituted_lower = choice.lower_bound.as_ref().map(|term| const_env.substitute_term(term));
+            let substituted_upper = choice.upper_bound.as_ref().map(|term| const_env.substitute_term(term));
+
+            let substituted_elements: Vec<_> = choice.elements.iter().map(|elem| {
+                let substituted_atom = const_env.substitute_atom(&elem.atom);
+                let substituted_condition: Vec<_> = elem.condition.iter()
+                    .map(|lit| match lit {
+                        Literal::Positive(atom) => Literal::Positive(const_env.substitute_atom(atom)),
+                        Literal::Negative(atom) => Literal::Negative(const_env.substitute_atom(atom)),
+                    })
+                    .collect();
+
+                crate::ast::ChoiceElement {
+                    atom: substituted_atom,
+                    condition: substituted_condition,
+                }
+            }).collect();
+
+            choice_rules.push(ChoiceRule {
+                lower_bound: substituted_lower,
+                upper_bound: substituted_upper,
+                elements: substituted_elements,
+                body: choice.body.clone(), // Body conditions are not substituted as they reference variables
+            });
+            has_asp_statements = true;
+        }
+        Statement::ProbFact(prob) => {
+            // Substitute constants in probabilistic fact
+            let substituted_atom = const_env.substitute_atom(&prob.atom);
+            prob_facts.push(crate::ast::ProbFact {
+                probability: prob.probability,
+                atom: substituted_atom,
+            });
+            // Probabilistic facts alone don't make it ASP - need choice rules or constraints
+        }
         Statement::ConstDecl(_) => {
             // Already handled when building const_env
         }
         Statement::Test(_) => {
             // Ignore embedded test blocks when preparing execution environment
-        }
-        _ => {
-            // Ignore other statement types in tests
         }
     };
 
@@ -107,11 +163,44 @@ pub fn run_test_block(base_statements: &[Statement], test_block: &TestBlock) -> 
         }
     }
 
-    // Evaluate rules to get complete database
-    let db = if rules.is_empty() {
-        initial_facts
+    // Evaluate program to get answer sets (ASP) or single database (Datalog)
+    let answer_sets = if has_asp_statements {
+        // Use ASP evaluation - construct program from collected components
+        let mut statements = Vec::new();
+
+        // Add facts
+        for atom in initial_facts.all_facts() {
+            statements.push(Statement::Fact(crate::ast::Fact { atom: atom.clone() }));
+        }
+
+        // Add rules
+        for rule in &rules {
+            statements.push(Statement::Rule(rule.clone()));
+        }
+
+        // Add constraints
+        for constraint in &constraints {
+            statements.push(Statement::Constraint(constraint.clone()));
+        }
+
+        // Add choice rules
+        for choice in &choice_rules {
+            statements.push(Statement::ChoiceRule(choice.clone()));
+        }
+
+        let program = crate::ast::Program { statements };
+        asp_evaluation(&program)
     } else {
-        semi_naive_evaluation(&rules, initial_facts)
+        // Use regular Datalog evaluation
+        let db = if rules.is_empty() {
+            initial_facts
+        } else {
+            semi_naive_evaluation(&rules, initial_facts)
+        };
+        // Convert single database to single answer set
+        vec![AnswerSet {
+            atoms: db.all_facts().into_iter().cloned().collect(),
+        }]
     };
 
     // Run each test case
@@ -119,7 +208,7 @@ pub fn run_test_block(base_statements: &[Statement], test_block: &TestBlock) -> 
     let mut passed_count = 0;
 
     for test_case in &test_block.test_cases {
-        let result = run_test_case(test_case, &db, &rules, &const_env);
+        let result = run_test_case_asp(test_case, &answer_sets, &rules, &const_env);
         if result.passed {
             passed_count += 1;
         }
@@ -137,10 +226,10 @@ pub fn run_test_block(base_statements: &[Statement], test_block: &TestBlock) -> 
     }
 }
 
-/// Run a single test case
-fn run_test_case(
+/// Run a single test case against answer sets (ASP-aware)
+fn run_test_case_asp(
     test_case: &TestCase,
-    db: &FactDatabase,
+    answer_sets: &[AnswerSet],
     rules: &[Rule],
     const_env: &ConstantEnv,
 ) -> TestCaseResult {
@@ -157,19 +246,77 @@ fn run_test_case(
 
     let query = crate::ast::Query { body: query_body };
 
-    // Run the query against derived facts first
-    let mut results = evaluate_query(&query, db);
+    // For ASP, a query succeeds if it succeeds in at least one answer set
+    let mut all_results = Vec::new();
+    let mut query_succeeded = false;
 
-    // If nothing matched, try a rule-based evaluation for simple cases
-    if results.is_empty() && should_use_rule_fallback(&query, rules) {
-        results = evaluate_query_with_rules(&query, db, rules);
+    for answer_set in answer_sets {
+        // Convert answer set to fact database for query evaluation
+        let mut db = FactDatabase::new();
+        for atom in &answer_set.atoms {
+            db.insert(atom.clone());
+        }
+
+        let results = evaluate_query(&query, &db);
+
+        // If nothing matched, try rule-based evaluation for simple cases
+        let final_results = if results.is_empty() && should_use_rule_fallback(&query, rules) {
+            evaluate_query_with_rules(&query, &db, rules)
+        } else {
+            results
+        };
+
+        if !final_results.is_empty() {
+            query_succeeded = true;
+            all_results.extend(final_results);
+        }
     }
 
     // Build query text for display
     let query_text = format_query(&test_case.query);
 
-    // Check assertions
-    let (positive_failures, negative_failures) = check_assertions(test_case, &results, const_env);
+    // For ASP, handle "true" assertions specially
+    let mut special_true_handled = false;
+    let mut adjusted_positive = Vec::new();
+    let mut adjusted_negative = Vec::new();
+
+    for assertion in &test_case.positive_assertions {
+        if assertion.predicate.as_ref() == "true" && assertion.terms.is_empty() {
+            // + true means "query should succeed"
+            if !query_succeeded {
+                adjusted_positive.push(assertion.clone());
+            }
+            special_true_handled = true;
+        } else {
+            adjusted_positive.push(assertion.clone());
+        }
+    }
+
+    for assertion in &test_case.negative_assertions {
+        if assertion.predicate.as_ref() == "true" && assertion.terms.is_empty() {
+            // - true means "query should fail"
+            if query_succeeded {
+                adjusted_negative.push(assertion.clone());
+            }
+            special_true_handled = true;
+        } else {
+            adjusted_negative.push(assertion.clone());
+        }
+    }
+
+    // Create adjusted test case for regular assertion checking
+    let adjusted_test_case = if special_true_handled {
+        TestCase {
+            query: test_case.query.clone(),
+            positive_assertions: adjusted_positive,
+            negative_assertions: adjusted_negative,
+        }
+    } else {
+        test_case.clone()
+    };
+
+    // Check remaining assertions against the union of all results
+    let (positive_failures, negative_failures) = check_assertions(&adjusted_test_case, &all_results, const_env);
 
     let passed = positive_failures.is_empty() && negative_failures.is_empty();
 
@@ -177,6 +324,9 @@ fn run_test_case(
         format!("✓ Query succeeded: {}", query_text)
     } else {
         let mut msg = format!("✗ Query failed: {}", query_text);
+        if !query_succeeded {
+            msg.push_str("\n  Query failed in all answer sets");
+        }
         if !positive_failures.is_empty() {
             msg.push_str(&format!(
                 "\n  Missing expected results: {}",
@@ -202,6 +352,8 @@ fn run_test_case(
 
     TestCaseResult { passed, message }
 }
+
+
 
 /// Evaluate a query against both derived facts and local rules
 fn evaluate_query_with_rules(
