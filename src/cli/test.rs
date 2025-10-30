@@ -23,9 +23,11 @@ pub fn run(filename: &str) {
     };
 
     let mut test_blocks = Vec::new();
+    let mut base_statements = Vec::new();
     for statement in &program.statements {
-        if let ast::Statement::Test(test_block) = statement {
-            test_blocks.push(test_block);
+        match statement {
+            ast::Statement::Test(test_block) => test_blocks.push(test_block),
+            other => base_statements.push(other.clone()),
         }
     }
 
@@ -49,7 +51,7 @@ pub fn run(filename: &str) {
     let mut total_failed = 0usize;
 
     for test_block in test_blocks {
-        let result = test_runner::run_test_block(test_block);
+        let result = test_runner::run_test_block(&base_statements, test_block);
         let color = if result.passed {
             COLOR_GREEN
         } else {

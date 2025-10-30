@@ -24,8 +24,10 @@ lives_in(charlie, london).
 lives_in(diana, berlin).
 
 #test "query specific person" {
-    person(alice).
-    person(bob).
+    person(george).
+
+    ?- person(george).
+    + true.
 
     ?- person(alice).
     + true.
@@ -35,41 +37,26 @@ lives_in(diana, berlin).
 }
 
 #test "query with variables" {
-    person(alice).
-    person(bob).
-    person(charlie).
-
-    age(alice, 30).
-    age(bob, 25).
-    age(charlie, 35).
-
     ?- age(alice, 30).
     + true.
 
     ?- age(alice, 25).
     - true.
+
+    ?- person(george).
+    - true.
 }
 
 #test "find all people in london" {
-    lives_in(alice, london).
-    lives_in(bob, paris).
-    lives_in(charlie, london).
-
-    ?- lives_in(alice, london).
-    + true.
-
-    ?- lives_in(charlie, london).
-    + true.
+    ?- lives_in(X, london).
+    + lives_in(alice, london).
+    + lives_in(charlie, london).
 
     ?- lives_in(bob, london).
     - true.
 }
 
 #test "query with multiple facts" {
-    person(alice).
-    age(alice, 30).
-    lives_in(alice, london).
-
     ?- person(alice).
     + true.
 

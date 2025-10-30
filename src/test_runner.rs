@@ -48,47 +48,66 @@ impl TestResult {
 }
 
 /// Run a test block and return results
-pub fn run_test_block(test_block: &TestBlock) -> TestResult {
-    // Extract constants from test statements
-    let const_env = ConstantEnv::from_statements(&test_block.statements);
+pub fn run_test_block(base_statements: &[Statement], test_block: &TestBlock) -> TestResult {
+    // Build constant environment from base program + test statements
+    let mut const_env = ConstantEnv::new();
+    for statement in base_statements.iter().chain(test_block.statements.iter()) {
+        if let Statement::ConstDecl(const_decl) = statement {
+            const_env.define(const_decl.name.clone(), const_decl.value.clone());
+        }
+    }
 
-    // Build initial database and rules from test statements
+    // Build initial database and rules from base statements + test statements
     let mut initial_facts = FactDatabase::new();
     let mut rules = Vec::new();
 
+    let mut process_statement = |statement: &Statement| match statement {
+        Statement::Fact(fact) => {
+            let substituted = const_env.substitute_atom(&fact.atom);
+            initial_facts.insert(substituted);
+        }
+        Statement::Rule(rule) => {
+            // Substitute constants in rule
+            let substituted_head = const_env.substitute_atom(&rule.head);
+            let substituted_body: Vec<_> = rule
+                .body
+                .iter()
+                .map(|lit| match lit {
+                    Literal::Positive(atom) => {
+                        Literal::Positive(const_env.substitute_atom(atom))
+                    }
+                    Literal::Negative(atom) => {
+                        Literal::Negative(const_env.substitute_atom(atom))
+                    }
+                })
+                .collect();
+
+            rules.push(Rule {
+                head: substituted_head,
+                body: substituted_body,
+            });
+        }
+        Statement::ConstDecl(_) => {
+            // Already handled when building const_env
+        }
+        Statement::Test(_) => {
+            // Ignore embedded test blocks when preparing execution environment
+        }
+        _ => {
+            // Ignore other statement types in tests
+        }
+    };
+
+    for statement in base_statements {
+        process_statement(statement);
+    }
+
     for statement in &test_block.statements {
         match statement {
-            Statement::Fact(fact) => {
-                let substituted = const_env.substitute_atom(&fact.atom);
-                initial_facts.insert(substituted);
+            Statement::Test(_) => {
+                // Nested tests inside a test block are ignored
             }
-            Statement::Rule(rule) => {
-                // Substitute constants in rule
-                let substituted_head = const_env.substitute_atom(&rule.head);
-                let substituted_body: Vec<_> = rule
-                    .body
-                    .iter()
-                    .map(|lit| match lit {
-                        Literal::Positive(atom) => {
-                            Literal::Positive(const_env.substitute_atom(atom))
-                        }
-                        Literal::Negative(atom) => {
-                            Literal::Negative(const_env.substitute_atom(atom))
-                        }
-                    })
-                    .collect();
-
-                rules.push(Rule {
-                    head: substituted_head,
-                    body: substituted_body,
-                });
-            }
-            Statement::ConstDecl(_) => {
-                // Already handled by const_env
-            }
-            _ => {
-                // Ignore other statement types in tests
-            }
+            other => process_statement(other),
         }
     }
 
@@ -604,7 +623,7 @@ mod tests {
             _ => panic!("Expected test block"),
         };
 
-        let result = run_test_block(test_block);
+        let result = run_test_block(&[], test_block);
         assert!(result.passed, "Test should pass");
         assert_eq!(result.passed_cases, 1);
     }
@@ -626,7 +645,7 @@ mod tests {
             _ => panic!("Expected test block"),
         };
 
-        let result = run_test_block(test_block);
+        let result = run_test_block(&[], test_block);
         assert!(!result.passed, "Test should fail");
         assert_eq!(result.passed_cases, 0);
     }
@@ -651,7 +670,7 @@ mod tests {
             _ => panic!("Expected test block"),
         };
 
-        let result = run_test_block(test_block);
+        let result = run_test_block(&[], test_block);
         assert!(result.passed, "Test should pass: {:?}", result.case_results);
     }
 
@@ -758,7 +777,7 @@ mod tests {
             "Derived database should contain critical(mage)"
         );
 
-        let result = run_test_block(test_block);
+        let result = run_test_block(&[], test_block);
         assert!(
             result.passed,
             "Test block should pass: {:?}",
@@ -790,7 +809,7 @@ mod tests {
             _ => panic!("Expected test block"),
         };
 
-        let result = run_test_block(test_block);
+        let result = run_test_block(&[], test_block);
         assert!(result.passed, "Fallback should allow rule evaluation");
         assert_eq!(result.passed_cases, 1);
     }
@@ -817,7 +836,7 @@ mod tests {
             _ => panic!("Expected test block"),
         };
 
-        let result = run_test_block(test_block);
+        let result = run_test_block(&[], test_block);
         assert!(result.passed, "Fallback should handle item level checks");
         assert_eq!(result.passed_cases, 1);
     }
@@ -843,7 +862,7 @@ mod tests {
             _ => panic!("Expected test block"),
         };
 
-        let result = run_test_block(test_block);
+        let result = run_test_block(&[], test_block);
         assert!(result.passed, "Fallback should handle rarity checks");
         assert_eq!(result.passed_cases, 1);
     }
