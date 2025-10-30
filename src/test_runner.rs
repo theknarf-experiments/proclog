@@ -161,10 +161,10 @@ fn run_test_case(
     let message = if passed {
         format!("✓ Query succeeded: {}", query_text)
     } else {
-        let mut msg = format!("✗ Query failed: {}\n", query_text);
+        let mut msg = format!("✗ Query failed: {}", query_text);
         if !positive_failures.is_empty() {
             msg.push_str(&format!(
-                "  Missing expected results: {}\n",
+                "\n  Missing expected results: {}",
                 positive_failures
                     .iter()
                     .map(|a| format!("{:?}", a))
@@ -174,7 +174,7 @@ fn run_test_case(
         }
         if !negative_failures.is_empty() {
             msg.push_str(&format!(
-                "  Found unexpected results: {}\n",
+                "\n  Found unexpected results: {}",
                 negative_failures
                     .iter()
                     .map(|a| format!("{:?}", a))

@@ -3,4 +3,5 @@
 test-all:
     for file in examples/*; do \
         cargo run -q -- test "$file"; \
+        echo; \
     done

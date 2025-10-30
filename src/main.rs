@@ -24,6 +24,12 @@ mod choice_constant_bounds_tests;
 #[cfg(test)]
 mod query_integration_tests;
 
+const COLOR_RESET: &str = "\x1b[0m";
+const COLOR_GREEN: &str = "\x1b[32m";
+const COLOR_RED: &str = "\x1b[31m";
+const COLOR_YELLOW: &str = "\x1b[33m";
+const COLOR_CYAN: &str = "\x1b[36m";
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
@@ -105,14 +111,19 @@ fn run_tests(filename: &str) {
     }
 
     if test_blocks.is_empty() {
-        println!("No test blocks found in '{}'", filename);
+        println!(
+            "{}No test blocks found in '{}'{}",
+            COLOR_YELLOW, filename, COLOR_RESET
+        );
         return;
     }
 
     println!(
-        "Running {} test blocks from '{}'...\n",
+        "{}Running {} test blocks from '{}'...{}",
+        COLOR_CYAN,
         test_blocks.len(),
-        filename
+        filename,
+        COLOR_RESET
     );
 
     // Run each test block
@@ -122,30 +133,44 @@ fn run_tests(filename: &str) {
     for test_block in test_blocks {
         let result = test_runner::run_test_block(test_block);
 
-        // Print results
-        println!("{}", result.summary());
+        let summary_line = result.summary();
 
         if result.passed {
+            println!("{}{}{}", COLOR_GREEN, summary_line, COLOR_RESET);
             total_passed += 1;
         } else {
+            println!("{}{}{}", COLOR_RED, summary_line, COLOR_RESET);
             total_failed += 1;
 
             // Print details of failures
             for case_result in &result.case_results {
                 if !case_result.passed {
-                    println!("  {}", case_result.message);
+                    for line in case_result.message.lines() {
+                        println!("  {}{}{}", COLOR_RED, line, COLOR_RESET);
+                    }
                 }
             }
         }
-        println!();
     }
 
     // Print overall summary
-    println!("=====================================");
-    println!("Test Summary:");
-    println!("  Passed: {}", total_passed);
-    println!("  Failed: {}", total_failed);
-    println!("  Total:  {}", total_passed + total_failed);
+    let total = total_passed + total_failed;
+    let status_color = if total_failed == 0 {
+        COLOR_GREEN
+    } else {
+        COLOR_RED
+    };
+    println!(
+        "{}Summary:{} passed={}, failed={}, total={} | Status: {}{}{}",
+        COLOR_YELLOW,
+        COLOR_RESET,
+        total_passed,
+        total_failed,
+        total,
+        status_color,
+        if total_failed == 0 { "PASS" } else { "FAIL" },
+        COLOR_RESET
+    );
 
     if total_failed > 0 {
         std::process::exit(1);
