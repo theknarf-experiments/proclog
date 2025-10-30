@@ -92,8 +92,20 @@ fn uppercase_ident() -> impl Parser<char, String, Error = ParseError> + Clone {
 
 /// Parse a string literal
 fn string_literal() -> impl Parser<char, String, Error = ParseError> + Clone {
+    let escape_sequence = just('\\').ignore_then(choice((
+        just('"').to('"'),
+        just('n').to('\n'),
+        just('t').to('\t'),
+        just('\\').to('\\'),
+    )));
+
+    let string_char = choice((
+        escape_sequence,
+        filter(|c| *c != '"' && *c != '\\' && *c != '\n'),
+    ));
+
     just('"')
-        .ignore_then(filter(|c| *c != '"').repeated())
+        .ignore_then(string_char.repeated())
         .then_ignore(just('"'))
         .collect::<String>()
         .labelled("string")
@@ -642,6 +654,55 @@ mod tests {
 
     fn range_const(start: i64, end_name: &str) -> Term {
         Term::Range(Box::new(int_term(start)), Box::new(atom_term(end_name)))
+    }
+
+    #[test]
+    fn test_string_literal_escape_sequences() {
+        let input = "\"escaped\\\" newline\\n tab\\t backslash\\\\\"";
+        let result = string_literal().parse(input);
+        assert!(result.is_ok(), "Failed to parse escapes: {:?}", result.err());
+        let parsed = result.unwrap();
+        assert_eq!(parsed, "escaped\" newline\n tab\t backslash\\");
+    }
+
+    #[test]
+    fn test_string_literal_rejects_raw_newline() {
+        let input = "\"line\nnext\"";
+        let result = string_literal().parse(input);
+        assert!(
+            result.is_err(),
+            "String literal with raw newline should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_string_literal_rejects_invalid_escape() {
+        let input = "\"invalid\\xescape\"";
+        let result = string_literal().parse(input);
+        assert!(
+            result.is_err(),
+            "String literal with invalid escape should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_string_literal_in_ast_has_interpreted_value() {
+        let input = "value(\"line\\nnext\").";
+        let result = parse_program(input);
+        assert!(result.is_ok(), "Failed to parse program: {:?}", result.err());
+        let program = result.unwrap();
+        match &program.statements[0] {
+            Statement::Fact(fact) => {
+                assert_eq!(fact.atom.terms.len(), 1);
+                match &fact.atom.terms[0] {
+                    Term::Constant(Value::String(s)) => {
+                        assert_eq!(s.as_ref(), "line\nnext");
+                    }
+                    other => panic!("Expected string constant, got {:?}", other),
+                }
+            }
+            other => panic!("Expected fact statement, got {:?}", other),
+        }
     }
 
     // Term parsing tests - Datatypes
