@@ -1,4 +1,4 @@
-use crate::repl::{ReplEngine, ResponseKind};
+use crate::repl::{EngineResponse, ReplEngine, ResponseKind};
 use crate::{COLOR_CYAN, COLOR_GREEN, COLOR_RED, COLOR_RESET, COLOR_YELLOW};
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
@@ -12,9 +12,9 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
     Terminal,
 };
-use std::{io::stdout, time::Duration};
+use std::{fs, io::stdout, path::Path, time::Duration};
 
-pub fn run() -> std::io::Result<()> {
+pub fn run(initial_file: Option<&Path>) -> std::io::Result<()> {
     struct ReplState {
         input: String,
         history: Vec<String>,
@@ -22,24 +22,89 @@ pub fn run() -> std::io::Result<()> {
         engine: ReplEngine,
     }
 
-    impl Default for ReplState {
-        fn default() -> Self {
+    impl ReplState {
+        fn new(engine: ReplEngine) -> Self {
             Self {
                 input: String::new(),
                 history: Vec::new(),
                 should_quit: false,
-                engine: ReplEngine::new(),
+                engine,
             }
         }
-    }
 
-    impl ReplState {
         fn push_history(&mut self, line: impl Into<String>) {
             const MAX_LEN: usize = 200;
             self.history.push(line.into());
             if self.history.len() > MAX_LEN {
                 let excess = self.history.len() - MAX_LEN;
                 self.history.drain(0..excess);
+            }
+        }
+
+        fn record_response(&mut self, response: EngineResponse) {
+            if response.lines.is_empty() {
+                return;
+            }
+            match response.kind {
+                ResponseKind::Info => {
+                    self.push_history(format!(
+                        "{}{}{}",
+                        COLOR_CYAN, response.lines[0], COLOR_RESET
+                    ));
+                    for line in response.lines.iter().skip(1) {
+                        self.push_history(line.clone());
+                    }
+                }
+                ResponseKind::Output => {
+                    let first = response.lines[0].clone();
+                    let color = if first == "true." {
+                        COLOR_GREEN
+                    } else if first == "false." || first.starts_with("No results.") {
+                        COLOR_RED
+                    } else {
+                        COLOR_YELLOW
+                    };
+                    self.push_history(format!("{}{}{}", color, first, COLOR_RESET));
+                    for line in response.lines.iter().skip(1) {
+                        self.push_history(line.clone());
+                    }
+                }
+                ResponseKind::Error => {
+                    for line in response.lines {
+                        self.push_history(format!("{}{}{}", COLOR_RED, line, COLOR_RESET));
+                    }
+                }
+            }
+        }
+    }
+
+    enum PreloadEntry {
+        Message(String),
+        Response(EngineResponse),
+    }
+
+    let mut engine = ReplEngine::new();
+    let mut preload = vec![PreloadEntry::Message(format!(
+        "{}Welcome to the ProcLog REPL! Type :help for commands.{}",
+        COLOR_CYAN, COLOR_RESET
+    ))];
+
+    if let Some(path) = initial_file {
+        let display_name = path.to_string_lossy().to_string();
+        match fs::read_to_string(path) {
+            Ok(content) => {
+                preload.push(PreloadEntry::Message(format!(
+                    "{}Loading file: {}{}",
+                    COLOR_CYAN, display_name, COLOR_RESET
+                )));
+                let response = engine.process_line(&content);
+                preload.push(PreloadEntry::Response(response));
+            }
+            Err(err) => {
+                preload.push(PreloadEntry::Message(format!(
+                    "{}Failed to read '{}': {}{}",
+                    COLOR_RED, display_name, err, COLOR_RESET
+                )));
             }
         }
     }
@@ -51,8 +116,13 @@ pub fn run() -> std::io::Result<()> {
     let mut terminal = Terminal::new(backend)?;
     terminal.show_cursor()?;
 
-    let mut state = ReplState::default();
-    state.push_history("Welcome to the ProcLog REPL! Type :help for commands.");
+    let mut state = ReplState::new(engine);
+    for entry in preload {
+        match entry {
+            PreloadEntry::Message(line) => state.push_history(line),
+            PreloadEntry::Response(response) => state.record_response(response),
+        }
+    }
 
     let res = loop {
         terminal.draw(|frame| {
@@ -131,48 +201,7 @@ pub fn run() -> std::io::Result<()> {
                                 }
                                 _ => {
                                     let response = state.engine.process_line(trimmed.as_str());
-                                    if response.lines.is_empty() {
-                                        // Nothing to report
-                                    } else {
-                                        match response.kind {
-                                            ResponseKind::Info => {
-                                                state.push_history(format!(
-                                                    "{}{}{}",
-                                                    COLOR_CYAN, response.lines[0], COLOR_RESET
-                                                ));
-                                                for line in response.lines.iter().skip(1) {
-                                                    state.push_history(line.clone());
-                                                }
-                                            }
-                                            ResponseKind::Output => {
-                                                let first = response.lines[0].clone();
-                                                let color = if first == "true." {
-                                                    COLOR_GREEN
-                                                } else if first == "false."
-                                                    || first.starts_with("No results.")
-                                                {
-                                                    COLOR_RED
-                                                } else {
-                                                    COLOR_YELLOW
-                                                };
-                                                state.push_history(format!(
-                                                    "{}{}{}",
-                                                    color, first, COLOR_RESET
-                                                ));
-                                                for line in response.lines.iter().skip(1) {
-                                                    state.push_history(line.clone());
-                                                }
-                                            }
-                                            ResponseKind::Error => {
-                                                for line in response.lines {
-                                                    state.push_history(format!(
-                                                        "{}{}{}",
-                                                        COLOR_RED, line, COLOR_RESET
-                                                    ));
-                                                }
-                                            }
-                                        }
-                                    }
+                                    state.record_response(response);
                                 }
                             }
                         }

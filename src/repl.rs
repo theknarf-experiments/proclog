@@ -121,21 +121,26 @@ impl ReplEngine {
                             );
                         }
                         Statement::Test(_) => {
-                            return EngineResponse::error_message(
-                                "Test blocks are not supported in the REPL.",
-                            );
+                            summary.skipped_tests += 1;
                         }
                     }
                 }
 
-                if to_add.is_empty() {
+                if to_add.is_empty() && summary.skipped_tests == 0 {
                     return EngineResponse::info(vec!["No statements recognized.".to_string()]);
                 }
 
-                self.statements.extend(to_add);
-                self.dirty = true;
+                if !to_add.is_empty() {
+                    self.statements.extend(to_add);
+                    self.dirty = true;
+                }
 
-                EngineResponse::info(vec![summary.summary_line()])
+                let lines = summary.summary_lines();
+                if lines.is_empty() {
+                    EngineResponse::info(vec!["No statements recognized.".to_string()])
+                } else {
+                    EngineResponse::info(lines)
+                }
             }
             Err(errors) => EngineResponse::error(format_parse_errors(errors)),
         }
@@ -243,10 +248,11 @@ struct AdditionSummary {
     rules: usize,
     constraints: usize,
     constants: usize,
+    skipped_tests: usize,
 }
 
 impl AdditionSummary {
-    fn summary_line(&self) -> String {
+    fn summary_lines(&self) -> Vec<String> {
         let mut parts = Vec::new();
         if self.facts > 0 {
             parts.push(format_count("fact", self.facts));
@@ -261,16 +267,32 @@ impl AdditionSummary {
             parts.push(format_count("constant", self.constants));
         }
 
-        if parts.is_empty() {
-            "No statements recognized.".to_string()
-        } else if parts.len() == 1 {
-            format!("Added {}.", parts[0])
-        } else if parts.len() == 2 {
-            format!("Added {} and {}.", parts[0], parts[1])
-        } else {
-            let last = parts.pop().unwrap();
-            format!("Added {}, and {}.", parts.join(", "), last)
+        let mut lines = Vec::new();
+        if !parts.is_empty() {
+            let message = if parts.len() == 1 {
+                format!("Added {}.", parts[0])
+            } else if parts.len() == 2 {
+                format!("Added {} and {}.", parts[0], parts[1])
+            } else {
+                let last = parts.pop().unwrap();
+                format!("Added {}, and {}.", parts.join(", "), last)
+            };
+            lines.push(message);
         }
+
+        if self.skipped_tests > 0 {
+            let msg = if self.skipped_tests == 1 {
+                "Skipped 1 test block (tests are not loaded into the REPL).".to_string()
+            } else {
+                format!(
+                    "Skipped {} test blocks (tests are not loaded into the REPL).",
+                    self.skipped_tests
+                )
+            };
+            lines.push(msg);
+        }
+
+        lines
     }
 }
 

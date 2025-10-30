@@ -56,7 +56,11 @@ enum Commands {
         filename: String,
     },
     /// Start the interactive ProcLog REPL
-    Repl,
+    Repl {
+        /// Optional ProcLog file to preload into the REPL
+        #[arg(value_name = "FILE")]
+        input: Option<std::path::PathBuf>,
+    },
 }
 
 fn main() {
@@ -66,8 +70,8 @@ fn main() {
         Commands::Test { filename } => {
             cli::test::run(&filename);
         }
-        Commands::Repl => {
-            if let Err(e) = cli::repl::run() {
+        Commands::Repl { input } => {
+            if let Err(e) = cli::repl::run(input.as_deref()) {
                 eprintln!("Failed to start REPL: {}", e);
                 std::process::exit(1);
             }
