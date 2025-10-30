@@ -8,6 +8,7 @@ use crossterm::{
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
+    style::{Color, Style},
     text::Line,
     widgets::{Block, Borders, Paragraph, Wrap},
     Terminal,
@@ -149,10 +150,12 @@ pub fn run(initial_file: Option<&Path>) -> std::io::Result<()> {
             frame.render_widget(history, chunks[0]);
 
             let input_display = format!("> {}", state.input);
+            let input_area = chunks[1];
+
             let input = Paragraph::new(vec![Line::from(input_display.as_str())])
-                .block(Block::default().title("Input").borders(Borders::ALL))
-                .wrap(Wrap { trim: false });
-            frame.render_widget(input, chunks[1]);
+                .wrap(Wrap { trim: false })
+                .style(Style::default().bg(Color::Rgb(40, 40, 40)));
+            frame.render_widget(input, input_area);
 
             let _ = frame.set_cursor(chunks[1].x + 2 + state.input.len() as u16, chunks[1].y + 1);
         })?;

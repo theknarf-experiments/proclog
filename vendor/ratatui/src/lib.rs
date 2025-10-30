@@ -1,5 +1,29 @@
 type CrosstermResult<T> = std::io::Result<T>;
 
+pub mod style {
+    #[derive(Clone, Copy)]
+    pub enum Color {
+        DarkGray,
+        Rgb(u8, u8, u8),
+    }
+
+    #[derive(Clone, Copy)]
+    pub struct Style {
+        pub(crate) bg: Option<Color>,
+    }
+
+    impl Style {
+        pub fn default() -> Self {
+            Self { bg: None }
+        }
+
+        pub fn bg(mut self, color: Color) -> Self {
+            self.bg = Some(color);
+            self
+        }
+    }
+}
+
 pub mod backend {
     use std::io::{Stdout, Write};
 
@@ -288,7 +312,7 @@ pub mod text {
 }
 
 pub mod widgets {
-    use super::{backend::Backend, layout::Rect, Frame, Widget};
+    use super::{backend::Backend, layout::Rect, style, Frame, Widget};
     use crate::text::Line;
 
     #[derive(Clone, Copy, Default)]
@@ -394,6 +418,7 @@ pub mod widgets {
         lines: Vec<Line>,
         block: Option<Block>,
         trim: bool,
+        style: style::Style,
     }
 
     impl Paragraph {
@@ -402,6 +427,7 @@ pub mod widgets {
                 lines,
                 block: None,
                 trim: false,
+                style: style::Style::default(),
             }
         }
 
@@ -412,6 +438,11 @@ pub mod widgets {
 
         pub fn wrap(mut self, wrap: Wrap) -> Self {
             self.trim = wrap.trim;
+            self
+        }
+
+        pub fn style(mut self, style: style::Style) -> Self {
+            self.style = style;
             self
         }
     }
@@ -425,7 +456,7 @@ pub mod widgets {
             if inner.width == 0 || inner.height == 0 {
                 return;
             }
-            let blank = " ".repeat(inner.width as usize);
+            let blank = apply_style(&" ".repeat(inner.width as usize), &self.style);
             for row in 0..inner.height {
                 let _ = frame
                     .backend_mut()
@@ -457,11 +488,24 @@ pub mod widgets {
                     } else {
                         chunk.to_string()
                     };
-                    let _ = frame.backend_mut().write_at(inner.x, y, &padded);
+                    let styled = apply_style(&padded, &self.style);
+                    let _ = frame.backend_mut().write_at(inner.x, y, &styled);
                     remaining = &remaining[take..];
                     y += 1;
                 }
             }
+        }
+    }
+
+    fn apply_style(content: &str, style: &style::Style) -> String {
+        match style.bg {
+            Some(style::Color::DarkGray) => {
+                format!("\x1b[48;2;40;40;40m{}\x1b[0m", content)
+            }
+            Some(style::Color::Rgb(r, g, b)) => {
+                format!("\x1b[48;2;{};{};{}m{}\x1b[0m", r, g, b, content)
+            }
+            None => content.to_string(),
         }
     }
 }
