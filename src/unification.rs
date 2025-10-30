@@ -109,6 +109,10 @@ pub fn unify(term1: &Term, term2: &Term, subst: &mut Substitution) -> bool {
         // Two identical terms unify trivially
         (Term::Constant(v1), Term::Constant(v2)) if v1 == v2 => true,
 
+        // Anonymous variable "_" unifies with anything without binding
+        (Term::Variable(var), _) if var.as_ref() == "_" => true,
+        (_, Term::Variable(var)) if var.as_ref() == "_" => true,
+
         // Variable unifies with anything (occurs check handled)
         (Term::Variable(var), t) | (t, Term::Variable(var)) => {
             // Occurs check: make sure var doesn't occur in t

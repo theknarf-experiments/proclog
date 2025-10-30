@@ -65,7 +65,10 @@ fn print_help(program_name: &str) {
     println!("ProcLog - Datalog for Procedural Generation\n");
     println!("Usage:");
     println!("  {}              Run demo programs", program_name);
-    println!("  {} test <file>  Run tests from a ProcLog file", program_name);
+    println!(
+        "  {} test <file>  Run tests from a ProcLog file",
+        program_name
+    );
     println!("  {} --help       Show this help message", program_name);
 }
 
@@ -106,7 +109,11 @@ fn run_tests(filename: &str) {
         return;
     }
 
-    println!("Running {} test blocks from '{}'...\n", test_blocks.len(), filename);
+    println!(
+        "Running {} test blocks from '{}'...\n",
+        test_blocks.len(),
+        filename
+    );
 
     // Run each test block
     let mut total_passed = 0;

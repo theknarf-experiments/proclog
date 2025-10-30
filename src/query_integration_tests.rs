@@ -110,7 +110,11 @@ mod query_integration_tests {
         // Query for alive people
         let query = parse_query("?- alive(X).").expect("Failed to parse query");
         let results = evaluate_query(&query, &result_db);
-        assert_eq!(results.len(), 2, "Should find 2 alive people: Mary and Alice");
+        assert_eq!(
+            results.len(),
+            2,
+            "Should find 2 alive people: Mary and Alice"
+        );
     }
 
     #[test]
@@ -249,8 +253,7 @@ mod query_integration_tests {
         let result_db = semi_naive_evaluation(&rules, facts);
 
         // Query for female ancestors of anna
-        let query =
-            parse_query("?- female_ancestor(X, anna).").expect("Failed to parse query");
+        let query = parse_query("?- female_ancestor(X, anna).").expect("Failed to parse query");
         let results = evaluate_query(&query, &result_db);
 
         assert_eq!(
@@ -322,20 +325,12 @@ mod query_integration_tests {
         // Query: ?- physics_constant(9.81).
         let query = parse_query("?- physics_constant(9.81).").expect("Failed to parse query");
         let results = evaluate_query(&query, &facts);
-        assert_eq!(
-            results.len(),
-            1,
-            "Should find physics_constant(9.81)"
-        );
+        assert_eq!(results.len(), 1, "Should find physics_constant(9.81)");
 
         // Query: ?- math_constant(X).
         let query2 = parse_query("?- math_constant(X).").expect("Failed to parse query");
         let results2 = evaluate_query(&query2, &facts);
-        assert_eq!(
-            results2.len(),
-            1,
-            "Should find one math constant"
-        );
+        assert_eq!(results2.len(), 1, "Should find one math constant");
     }
 
     #[test]
@@ -366,23 +361,14 @@ mod query_integration_tests {
         assert_eq!(results.len(), 1, "Should find setting(debug, true)");
 
         // Query: ?- setting(production, false).
-        let query2 = parse_query("?- setting(production, false).")
-            .expect("Failed to parse query");
+        let query2 = parse_query("?- setting(production, false).").expect("Failed to parse query");
         let results2 = evaluate_query(&query2, &facts);
-        assert_eq!(
-            results2.len(),
-            1,
-            "Should find setting(production, false)"
-        );
+        assert_eq!(results2.len(), 1, "Should find setting(production, false)");
 
         // Query: ?- setting(X, true).
         let query3 = parse_query("?- setting(X, true).").expect("Failed to parse query");
         let results3 = evaluate_query(&query3, &facts);
-        assert_eq!(
-            results3.len(),
-            1,
-            "Should find one setting with true"
-        );
+        assert_eq!(results3.len(), 1, "Should find one setting with true");
     }
 
     #[test]
@@ -475,8 +461,8 @@ mod query_integration_tests {
         }
 
         // Query: ?- character("Player", 100, true, 1).
-        let query = parse_query(r#"?- character("Player", 100, true, 1)."#)
-            .expect("Failed to parse query");
+        let query =
+            parse_query(r#"?- character("Player", 100, true, 1)."#).expect("Failed to parse query");
         let results = evaluate_query(&query, &facts);
         assert_eq!(
             results.len(),
@@ -553,7 +539,11 @@ mod query_integration_tests {
         // Query: ?- perfect(X).
         let query = parse_query("?- perfect(X).").expect("Failed to parse query");
         let results = evaluate_query(&query, &result_db);
-        assert_eq!(results.len(), 1, "Should find 1 person with perfect score (bob)");
+        assert_eq!(
+            results.len(),
+            1,
+            "Should find 1 person with perfect score (bob)"
+        );
     }
 
     #[test]
@@ -624,4 +614,3 @@ mod query_integration_tests {
         assert_eq!(results2.len(), 0, "No one has a perfect score of 100");
     }
 }
-

@@ -48,7 +48,9 @@ pub fn extract_bindings(
     variables
         .iter()
         .filter_map(|var| {
-            subst.get(var).map(|term| (var.clone(), format!("{:?}", term)))
+            subst
+                .get(var)
+                .map(|term| (var.clone(), format!("{:?}", term)))
         })
         .collect()
 }
@@ -125,7 +127,10 @@ mod tests {
     fn test_query_ground_false() {
         // Setup database
         let mut db = FactDatabase::new();
-        db.insert(make_atom("parent", vec![atom_term("john"), atom_term("mary")]));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_term("john"), atom_term("mary")],
+        ));
 
         // Query: ?- parent(alice, bob). (not in database)
         let query = Query {
@@ -143,9 +148,18 @@ mod tests {
     fn test_query_with_one_variable() {
         // Setup database
         let mut db = FactDatabase::new();
-        db.insert(make_atom("parent", vec![atom_term("john"), atom_term("mary")]));
-        db.insert(make_atom("parent", vec![atom_term("alice"), atom_term("mary")]));
-        db.insert(make_atom("parent", vec![atom_term("bob"), atom_term("sue")]));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_term("john"), atom_term("mary")],
+        ));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_term("alice"), atom_term("mary")],
+        ));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_term("bob"), atom_term("sue")],
+        ));
 
         // Query: ?- parent(X, mary).
         let query = Query {
@@ -182,12 +196,21 @@ mod tests {
     fn test_query_with_multiple_variables() {
         // Setup database
         let mut db = FactDatabase::new();
-        db.insert(make_atom("parent", vec![atom_term("john"), atom_term("mary")]));
-        db.insert(make_atom("parent", vec![atom_term("alice"), atom_term("bob")]));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_term("john"), atom_term("mary")],
+        ));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_term("alice"), atom_term("bob")],
+        ));
 
         // Query: ?- parent(X, Y).
         let query = Query {
-            body: vec![Literal::Positive(make_atom("parent", vec![var("X"), var("Y")]))],
+            body: vec![Literal::Positive(make_atom(
+                "parent",
+                vec![var("X"), var("Y")],
+            ))],
         };
 
         let results = evaluate_query(&query, &db);
@@ -198,8 +221,14 @@ mod tests {
     fn test_query_with_join() {
         // Setup database
         let mut db = FactDatabase::new();
-        db.insert(make_atom("parent", vec![atom_term("john"), atom_term("mary")]));
-        db.insert(make_atom("parent", vec![atom_term("mary"), atom_term("sue")]));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_term("john"), atom_term("mary")],
+        ));
+        db.insert(make_atom(
+            "parent",
+            vec![atom_term("mary"), atom_term("sue")],
+        ));
 
         // Query: ?- parent(X, Y), parent(Y, Z).
         // Should find: X=john, Y=mary, Z=sue
@@ -211,11 +240,7 @@ mod tests {
         };
 
         let results = evaluate_query(&query, &db);
-        assert_eq!(
-            results.len(),
-            1,
-            "Should find 1 grandparent relationship"
-        );
+        assert_eq!(results.len(), 1, "Should find 1 grandparent relationship");
     }
 
     #[test]

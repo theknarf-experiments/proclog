@@ -64,7 +64,7 @@ fn number() -> impl Parser<char, Value, Error = ParseError> + Clone {
 fn lowercase_ident() -> impl Parser<char, String, Error = ParseError> + Clone {
     text::ident()
         .try_map(|s: String, span| {
-            if s.chars().next().unwrap().is_lowercase() {
+            if s.chars().next().unwrap().is_lowercase() || s.starts_with('_') {
                 Ok(s)
             } else {
                 Err(ParseError::custom(span, "expected lowercase identifier"))
@@ -270,7 +270,10 @@ fn literal() -> impl Parser<char, Literal, Error = ParseError> + Clone {
 
     let positive = choice((infix_comparison(), atom())).map(Literal::Positive);
 
-    negated.or(positive).labelled("literal")
+    negated
+        .or(positive)
+        .padded_by(spacing())
+        .labelled("literal")
 }
 
 /// Parse a line comment (starts with % and goes to end of line)
@@ -305,10 +308,17 @@ fn comment() -> impl Parser<char, (), Error = ParseError> + Clone {
     block_comment().or(line_comment()).labelled("comment")
 }
 
+fn spacing() -> impl Parser<char, (), Error = ParseError> + Clone {
+    comment()
+        .or(text::whitespace().at_least(1).ignored())
+        .repeated()
+        .ignored()
+}
+
 /// Parse a fact
 fn fact() -> impl Parser<char, Statement, Error = ParseError> + Clone {
     atom()
-        .then_ignore(just('.').padded())
+        .then_ignore(just('.').padded_by(spacing()))
         .map(|atom| Statement::Fact(Fact { atom }))
         .labelled("fact")
 }
@@ -316,9 +326,13 @@ fn fact() -> impl Parser<char, Statement, Error = ParseError> + Clone {
 /// Parse a rule
 fn rule() -> impl Parser<char, Statement, Error = ParseError> + Clone {
     atom()
-        .then_ignore(just(":-").padded())
-        .then(literal().separated_by(just(',').padded()).at_least(1))
-        .then_ignore(just('.').padded())
+        .then_ignore(just(":-").padded_by(spacing()))
+        .then(
+            literal()
+                .separated_by(just(',').padded_by(spacing()))
+                .at_least(1),
+        )
+        .then_ignore(just('.').padded_by(spacing()))
         .map(|(head, body)| Statement::Rule(Rule { head, body }))
         .labelled("rule")
 }
@@ -326,9 +340,13 @@ fn rule() -> impl Parser<char, Statement, Error = ParseError> + Clone {
 /// Parse a constraint
 fn constraint() -> impl Parser<char, Statement, Error = ParseError> + Clone {
     just(":-")
-        .padded()
-        .ignore_then(literal().separated_by(just(',').padded()).at_least(1))
-        .then_ignore(just('.').padded())
+        .padded_by(spacing())
+        .ignore_then(
+            literal()
+                .separated_by(just(',').padded_by(spacing()))
+                .at_least(1),
+        )
+        .then_ignore(just('.').padded_by(spacing()))
         .map(|body| Statement::Constraint(Constraint { body }))
         .labelled("constraint")
 }
@@ -388,13 +406,10 @@ fn const_decl() -> impl Parser<char, Statement, Error = ParseError> + Clone {
 
 /// Parse a test assertion: + atom. or - atom.
 fn test_assertion() -> impl Parser<char, (bool, Atom), Error = ParseError> + Clone {
-    choice((
-        just('+').padded().to(true),
-        just('-').padded().to(false),
-    ))
-    .then(atom())
-    .then_ignore(just('.').padded())
-    .labelled("test assertion")
+    choice((just('+').padded().to(true), just('-').padded().to(false)))
+        .then(atom())
+        .then_ignore(just('.').padded())
+        .labelled("test assertion")
 }
 
 /// Parse a test case: query followed by assertions
@@ -435,29 +450,33 @@ fn test_case() -> impl Parser<char, TestCase, Error = ParseError> + Clone {
 
 /// Parse a test block: #test "name" { statements and test cases }
 fn test_block() -> impl Parser<char, Statement, Error = ParseError> + Clone {
+    let spacing = || {
+        comment()
+            .or(text::whitespace().at_least(1).ignored())
+            .repeated()
+            .ignored()
+    };
+
     // Test block content item can be either a statement or a test case
     let test_item = choice((
         // Try test case first (starts with ?-)
         test_case().map(|tc| (None, Some(tc))),
         // Then try regular statements (but not other test blocks)
-        choice((
-            const_decl(),
-            prob_fact(),
-            constraint(),
-            rule(),
-            fact(),
-        ))
-        .map(|stmt| (Some(stmt), None)),
-    ));
+        choice((const_decl(), prob_fact(), constraint(), rule(), fact()))
+            .map(|stmt| (Some(stmt), None)),
+    ))
+    .padded_by(spacing());
 
     just('#')
         .then_ignore(text::keyword("test").padded())
         .ignore_then(string_literal())
+        .then_ignore(spacing())
         .then(
-            test_item
-                .repeated()
-                .collect::<Vec<_>>()
-                .delimited_by(just('{').padded(), just('}').padded()),
+            just('{')
+                .ignore_then(spacing())
+                .ignore_then(test_item.repeated().collect::<Vec<_>>())
+                .then_ignore(spacing())
+                .then_ignore(just('}')),
         )
         .map(|(name, items)| {
             let mut statements = Vec::new();
@@ -551,10 +570,10 @@ fn choice_rule() -> impl Parser<char, Statement, Error = ParseError> + Clone {
 /// Parse a statement
 fn statement() -> impl Parser<char, Statement, Error = ParseError> + Clone {
     choice((
-        test_block(),   // Try #test first (distinctive prefix)
-        const_decl(),   // Try #const (distinctive prefix)
+        test_block(), // Try #test first (distinctive prefix)
+        const_decl(), // Try #const (distinctive prefix)
         prob_fact(),
-        choice_rule(),  // Try choice rules (distinctive { prefix)
+        choice_rule(), // Try choice rules (distinctive { prefix)
         constraint(),
         rule(),
         fact(),
@@ -1916,6 +1935,37 @@ mod tests {
                 // Second query
                 assert_eq!(test_block.test_cases[1].positive_assertions.len(), 2);
                 assert_eq!(test_block.test_cases[1].negative_assertions.len(), 1);
+            }
+            _ => panic!("Expected test block"),
+        }
+    }
+
+    #[test]
+    fn test_parse_test_block_with_comments() {
+        let input = r#"
+            #test "comments ok" {
+                parent(john, mary).
+
+                % inline comment inside test block
+                ?- parent(john, mary).
+                + true.
+            }
+        "#;
+        let result = parse_program(input);
+        assert!(
+            result.is_ok(),
+            "Parser should allow comments in test blocks, but got: {:?}",
+            result.err()
+        );
+
+        let program = result.unwrap();
+        assert_eq!(program.statements.len(), 1);
+
+        match &program.statements[0] {
+            Statement::Test(test_block) => {
+                assert_eq!(test_block.name, "comments ok");
+                assert_eq!(test_block.statements.len(), 1);
+                assert_eq!(test_block.test_cases.len(), 1);
             }
             _ => panic!("Expected test block"),
         }
