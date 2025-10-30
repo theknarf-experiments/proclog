@@ -97,6 +97,12 @@ pub struct ChoiceElement {
     pub condition: Vec<Literal>, // Optional condition after ':'
 }
 
+/// A query: `?- parent(X, mary).` or `?- ancestor(X, Y), parent(Y, mary).`
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Query {
+    pub body: Vec<Literal>,
+}
+
 /// A literal is either a positive or negative atom
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Literal {

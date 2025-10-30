@@ -6,6 +6,7 @@ mod database;
 mod evaluation;
 mod grounding;
 mod parser;
+mod query;
 mod safety;
 mod stratification;
 mod unification;
@@ -18,6 +19,9 @@ mod arithmetic_integration_tests;
 
 #[cfg(test)]
 mod choice_constant_bounds_tests;
+
+#[cfg(test)]
+mod query_integration_tests;
 
 fn main() {
     println!("ProcLog - Datalog for Procedural Generation\n");

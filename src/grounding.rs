@@ -241,40 +241,74 @@ fn satisfy_body_mixed_recursive(
 
     match first_literal {
         Literal::Positive(atom) => {
-            // Use delta if current position is delta_pos, otherwise use full_db
-            let db = if current_pos == delta_pos {
-                delta
-            } else {
-                full_db
-            };
-            let initial_substs = db.query(atom);
-
-            if rest.is_empty() {
-                initial_substs
-            } else {
-                let mut all_substs = Vec::new();
-
-                for subst in initial_substs {
-                    let applied_rest: Vec<Literal> = rest
-                        .iter()
-                        .map(|lit| apply_subst_to_literal(&subst, lit))
-                        .collect();
-
+            // Check if this is a built-in predicate
+            if let Some(builtin) = crate::builtins::parse_builtin(atom) {
+                // This is a built-in - process the rest first, then filter
+                if rest.is_empty() {
+                    // No more literals - evaluate built-in with empty substitution
+                    let empty_subst = Substitution::new();
+                    match crate::builtins::eval_builtin(&builtin, &empty_subst) {
+                        Some(true) => vec![empty_subst],
+                        _ => vec![],
+                    }
+                } else {
+                    // Process rest first, then check built-in for each substitution
                     let rest_substs = satisfy_body_mixed_recursive(
-                        &applied_rest,
+                        rest,
                         delta,
                         full_db,
                         delta_pos,
                         current_pos + 1,
                     );
+                    let mut result = Vec::new();
 
-                    for rest_subst in rest_substs {
-                        let combined = combine_substs(&subst, &rest_subst);
-                        all_substs.push(combined);
+                    for subst in rest_substs {
+                        // Apply substitution to the built-in and evaluate
+                        let applied_builtin = apply_subst_to_builtin(&subst, &builtin);
+                        match crate::builtins::eval_builtin(&applied_builtin, &subst) {
+                            Some(true) => result.push(subst),
+                            _ => {} // Built-in failed, skip this substitution
+                        }
                     }
-                }
 
-                all_substs
+                    result
+                }
+            } else {
+                // Regular atom - use delta if current position is delta_pos, otherwise use full_db
+                let db = if current_pos == delta_pos {
+                    delta
+                } else {
+                    full_db
+                };
+                let initial_substs = db.query(atom);
+
+                if rest.is_empty() {
+                    initial_substs
+                } else {
+                    let mut all_substs = Vec::new();
+
+                    for subst in initial_substs {
+                        let applied_rest: Vec<Literal> = rest
+                            .iter()
+                            .map(|lit| apply_subst_to_literal(&subst, lit))
+                            .collect();
+
+                        let rest_substs = satisfy_body_mixed_recursive(
+                            &applied_rest,
+                            delta,
+                            full_db,
+                            delta_pos,
+                            current_pos + 1,
+                        );
+
+                        for rest_subst in rest_substs {
+                            let combined = combine_substs(&subst, &rest_subst);
+                            all_substs.push(combined);
+                        }
+                    }
+
+                    all_substs
+                }
             }
         }
         Literal::Negative(atom) => {

@@ -486,6 +486,26 @@ pub fn parse_program(input: &str) -> Result<Program, Vec<ParseError>> {
     program().parse(input)
 }
 
+/// Parse a query: ?- literal1, literal2, ..., literalN.
+fn query() -> impl Parser<char, Query, Error = ParseError> + Clone {
+    just('?')
+        .then_ignore(just('-').padded())
+        .ignore_then(
+            literal()
+                .separated_by(just(',').padded())
+                .at_least(1)
+                .collect::<Vec<_>>(),
+        )
+        .then_ignore(just('.').padded())
+        .map(|body| Query { body })
+        .labelled("query")
+}
+
+/// Helper function to parse a query
+pub fn parse_query(input: &str) -> Result<Query, Vec<ParseError>> {
+    query().parse(input)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1628,5 +1648,81 @@ mod tests {
             }
             _ => panic!("Expected choice rule"),
         }
+    }
+
+    // Query parsing tests
+    #[test]
+    fn test_parse_query_ground() {
+        let result = parse_query("?- parent(john, mary).");
+        assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+        let query = result.unwrap();
+        assert_eq!(query.body.len(), 1);
+        match &query.body[0] {
+            Literal::Positive(atom) => {
+                assert_eq!(atom.predicate, Intern::new("parent".to_string()));
+                assert_eq!(atom.terms.len(), 2);
+            }
+            _ => panic!("Expected positive literal"),
+        }
+    }
+
+    #[test]
+    fn test_parse_query_with_variable() {
+        let result = parse_query("?- parent(X, mary).");
+        assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+        let query = result.unwrap();
+        assert_eq!(query.body.len(), 1);
+        match &query.body[0] {
+            Literal::Positive(atom) => {
+                assert_eq!(atom.predicate, Intern::new("parent".to_string()));
+                match &atom.terms[0] {
+                    Term::Variable(v) => assert_eq!(*v, Intern::new("X".to_string())),
+                    _ => panic!("Expected variable"),
+                }
+            }
+            _ => panic!("Expected positive literal"),
+        }
+    }
+
+    #[test]
+    fn test_parse_query_multiple_literals() {
+        let result = parse_query("?- parent(X, Y), parent(Y, Z).");
+        assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+        let query = result.unwrap();
+        assert_eq!(query.body.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_query_with_negation() {
+        let result = parse_query("?- parent(X, Y), not dead(X).");
+        assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+        let query = result.unwrap();
+        assert_eq!(query.body.len(), 2);
+        assert!(query.body[0].is_positive());
+        assert!(query.body[1].is_negative());
+    }
+
+    #[test]
+    fn test_parse_query_complex() {
+        let result = parse_query("?- ancestor(X, Z), parent(X, Y), parent(Y, Z), not dead(Z).");
+        assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+        let query = result.unwrap();
+        assert_eq!(query.body.len(), 4);
+    }
+
+    #[test]
+    fn test_parse_query_with_builtin() {
+        let result = parse_query("?- age(X, A), A > 18.");
+        assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+        let query = result.unwrap();
+        assert_eq!(query.body.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_query_zero_arity() {
+        let result = parse_query("?- running.");
+        assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+        let query = result.unwrap();
+        assert_eq!(query.body.len(), 1);
     }
 }
