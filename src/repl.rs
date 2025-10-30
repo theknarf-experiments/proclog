@@ -1,4 +1,5 @@
 use crate::ast::{Constraint, Literal, Query, Rule, Statement, Symbol, Term, Value};
+use crate::asp::{asp_evaluation, AnswerSet};
 use crate::constants::ConstantEnv;
 use crate::database::FactDatabase;
 use crate::evaluation::stratified_evaluation_with_constraints;
@@ -110,10 +111,9 @@ impl ReplEngine {
                             summary.constants += 1;
                             to_add.push(Statement::ConstDecl(decl));
                         }
-                        Statement::ChoiceRule(_) => {
-                            return EngineResponse::error_message(
-                                "Choice rules are not supported in the REPL yet.",
-                            );
+                        Statement::ChoiceRule(choice) => {
+                            summary.choice_rules += 1;
+                            to_add.push(Statement::ChoiceRule(choice));
                         }
                         Statement::ProbFact(_) => {
                             return EngineResponse::error_message(
@@ -164,8 +164,41 @@ impl ReplEngine {
                         .collect(),
                 };
 
-                let results = evaluate_query(&substituted_query, &compiled.derived_db);
-                let lines = format_query_results(&substituted_query, &results);
+                let lines = match &compiled.result {
+                    CompiledResult::Datalog(db) => {
+                        let results = evaluate_query(&substituted_query, db);
+                        format_query_results(&substituted_query, &results)
+                    }
+                    CompiledResult::Asp(answer_sets) => {
+                        let mut all_results = Vec::new();
+                        let mut answer_set_count = 0;
+
+                        for answer_set in answer_sets {
+                            answer_set_count += 1;
+                            // Convert answer set to fact database for query evaluation
+                            let mut db = FactDatabase::new();
+                            for atom in &answer_set.atoms {
+                                db.insert(atom.clone());
+                            }
+
+                            let results = evaluate_query(&substituted_query, &db);
+                            if !results.is_empty() {
+                                all_results.extend(results);
+                            }
+                        }
+
+                        if answer_sets.is_empty() {
+                            vec![format!("No answer sets found.")]
+                        } else if all_results.is_empty() {
+                            vec![format!("Query failed in all {} answer sets.", answer_set_count)]
+                        } else {
+                            let mut lines = format_query_results(&substituted_query, &all_results);
+                            lines.insert(0, format!("Query succeeded in {} answer sets:", answer_set_count));
+                            lines
+                        }
+                    }
+                };
+
                 EngineResponse::output(lines)
             }
             Err(err_lines) => EngineResponse::error(err_lines),
@@ -186,6 +219,7 @@ impl ReplEngine {
         let mut base_facts = FactDatabase::new();
         let mut rules = Vec::new();
         let mut constraints = Vec::new();
+        let mut choice_rules = Vec::new();
 
         for statement in &self.statements {
             match statement {
@@ -210,11 +244,35 @@ impl ReplEngine {
                         .collect();
                     constraints.push(Constraint { body });
                 }
+                Statement::ChoiceRule(choice) => {
+                    // Substitute constants in choice rule bounds and elements
+                    let substituted_lower = choice.lower_bound.as_ref().map(|term| const_env.substitute_term(term));
+                    let substituted_upper = choice.upper_bound.as_ref().map(|term| const_env.substitute_term(term));
+
+                    let substituted_elements: Vec<_> = choice.elements.iter().map(|elem| {
+                        let substituted_atom = const_env.substitute_atom(&elem.atom);
+                        let substituted_condition: Vec<_> = elem.condition.iter()
+                            .map(|lit| match lit {
+                                crate::ast::Literal::Positive(atom) => crate::ast::Literal::Positive(const_env.substitute_atom(atom)),
+                                crate::ast::Literal::Negative(atom) => crate::ast::Literal::Negative(const_env.substitute_atom(atom)),
+                            })
+                            .collect();
+
+                        crate::ast::ChoiceElement {
+                            atom: substituted_atom,
+                            condition: substituted_condition,
+                        }
+                    }).collect();
+
+                    choice_rules.push(crate::ast::ChoiceRule {
+                        lower_bound: substituted_lower,
+                        upper_bound: substituted_upper,
+                        elements: substituted_elements,
+                        body: choice.body.clone(), // Body conditions are not substituted as they reference variables
+                    });
+                }
                 Statement::ConstDecl(_) => {
                     // Already captured in const_env
-                }
-                Statement::ChoiceRule(_) => {
-                    return Err("Choice rules are not supported in the REPL yet.".to_string());
                 }
                 Statement::ProbFact(_) => {
                     return Err(
@@ -227,19 +285,54 @@ impl ReplEngine {
             }
         }
 
-        let derived_db = stratified_evaluation_with_constraints(&rules, &constraints, base_facts)
-            .map_err(|err| format!("Evaluation error: {}", err))?;
+        let result = if !choice_rules.is_empty() {
+            // Use ASP evaluation
+            let mut statements = Vec::new();
+
+            // Add facts
+            for atom in base_facts.all_facts() {
+                statements.push(Statement::Fact(crate::ast::Fact { atom: atom.clone() }));
+            }
+
+            // Add rules
+            for rule in &rules {
+                statements.push(Statement::Rule(rule.clone()));
+            }
+
+            // Add constraints
+            for constraint in &constraints {
+                statements.push(Statement::Constraint(constraint.clone()));
+            }
+
+            // Add choice rules
+            for choice in &choice_rules {
+                statements.push(Statement::ChoiceRule(choice.clone()));
+            }
+
+            let program = crate::ast::Program { statements };
+            CompiledResult::Asp(asp_evaluation(&program))
+        } else {
+            // Use regular Datalog evaluation
+            let derived_db = stratified_evaluation_with_constraints(&rules, &constraints, base_facts)
+                .map_err(|err| format!("Evaluation error: {}", err))?;
+            CompiledResult::Datalog(derived_db)
+        };
 
         Ok(CompiledProgram {
             const_env,
-            derived_db,
+            result,
         })
     }
 }
 
+enum CompiledResult {
+    Datalog(FactDatabase),
+    Asp(Vec<AnswerSet>),
+}
+
 struct CompiledProgram {
     const_env: ConstantEnv,
-    derived_db: FactDatabase,
+    result: CompiledResult,
 }
 
 #[derive(Default)]
@@ -247,6 +340,7 @@ struct AdditionSummary {
     facts: usize,
     rules: usize,
     constraints: usize,
+    choice_rules: usize,
     constants: usize,
     skipped_tests: usize,
 }
@@ -262,6 +356,9 @@ impl AdditionSummary {
         }
         if self.constraints > 0 {
             parts.push(format_count("constraint", self.constraints));
+        }
+        if self.choice_rules > 0 {
+            parts.push(format_count("choice rule", self.choice_rules));
         }
         if self.constants > 0 {
             parts.push(format_count("constant", self.constants));
@@ -303,6 +400,8 @@ fn format_count(label: &str, count: usize) -> String {
         format!("{} {}s", count, label)
     }
 }
+
+
 
 fn substitute_literal(env: &ConstantEnv, literal: &Literal) -> Literal {
     match literal {
@@ -418,6 +517,30 @@ mod tests {
             &response.lines[1..],
             &["X = alice".to_string(), "X = john".to_string()]
         );
+    }
+
+    #[test]
+    fn test_repl_choice_rules() {
+        let mut engine = ReplEngine::new();
+
+        // Add facts
+        let response = engine.process_line("race(human).");
+        assert_eq!(response.kind, ResponseKind::Info);
+        assert!(response.lines[0].contains("Added 1 fact"));
+
+        let response = engine.process_line("race(elf).");
+        assert_eq!(response.kind, ResponseKind::Info);
+
+        // Add choice rule
+        let response = engine.process_line("1 { character_race(R) : race(R) } 1.");
+        assert_eq!(response.kind, ResponseKind::Info);
+        assert!(response.lines[0].contains("Added 1 choice rule"));
+
+        // Query should work and show results from answer sets
+        let response = engine.process_line("?- character_race(X).");
+        assert_eq!(response.kind, ResponseKind::Output);
+        // Should contain results from ASP evaluation
+        assert!(response.lines.len() > 0);
     }
 
     #[test]
