@@ -7,10 +7,11 @@ use internment::Intern;
 use proclog::asp::{asp_evaluation, AnswerSet};
 use proclog::ast::{
     Atom, ChoiceRule, Constraint, Literal, Rule, Statement, Symbol, Term, TestBlock, TestCase,
+    Value,
 };
 use proclog::builtins;
 use proclog::constants::ConstantEnv;
-use proclog::database::FactDatabase;
+use proclog::database::{FactDatabase, InsertError};
 use proclog::evaluation::{stratified_evaluation_with_constraints, EvaluationError};
 use proclog::query::evaluate_query;
 use proclog::unification::{unify_atoms, Substitution};
@@ -50,6 +51,22 @@ impl TestResult {
     }
 }
 
+#[derive(Debug)]
+enum PreparationError {
+    NonGroundFact { atom: Atom },
+}
+
+impl PreparationError {
+    fn message(&self) -> String {
+        match self {
+            PreparationError::NonGroundFact { atom } => format!(
+                "Encountered non-ground fact {}. Facts in test inputs must be ground.",
+                format_atom_pretty(atom)
+            ),
+        }
+    }
+}
+
 /// Run a test block and return results
 pub fn run_test_block(base_statements: &[Statement], test_block: &TestBlock) -> TestResult {
     // Build constant environment from base program + test statements
@@ -67,116 +84,146 @@ pub fn run_test_block(base_statements: &[Statement], test_block: &TestBlock) -> 
     let mut choice_rules = Vec::new();
     let mut has_asp_statements = false;
 
-    let mut process_statement = |statement: &Statement| match statement {
-        Statement::Fact(fact) => {
-            let substituted = const_env.substitute_atom(&fact.atom);
-            initial_facts.insert(substituted).unwrap();
-        }
-        Statement::Rule(rule) => {
-            // Substitute constants in rule
-            let substituted_head = const_env.substitute_atom(&rule.head);
-            let substituted_body: Vec<_> = rule
-                .body
-                .iter()
-                .map(|lit| match lit {
-                    Literal::Positive(atom) => Literal::Positive(const_env.substitute_atom(atom)),
-                    Literal::Negative(atom) => Literal::Negative(const_env.substitute_atom(atom)),
-                })
-                .collect();
+    let mut process_statement = |statement: &Statement| -> Result<(), PreparationError> {
+        match statement {
+            Statement::Fact(fact) => {
+                let substituted = const_env.substitute_atom(&fact.atom);
+                initial_facts
+                    .insert(substituted)
+                    .map(|_| ())
+                    .map_err(|err| match err {
+                        InsertError::NonGroundAtom(atom) => {
+                            PreparationError::NonGroundFact { atom }
+                        }
+                    })
+            }
+            Statement::Rule(rule) => {
+                // Substitute constants in rule
+                let substituted_head = const_env.substitute_atom(&rule.head);
+                let substituted_body: Vec<_> = rule
+                    .body
+                    .iter()
+                    .map(|lit| match lit {
+                        Literal::Positive(atom) => {
+                            Literal::Positive(const_env.substitute_atom(atom))
+                        }
+                        Literal::Negative(atom) => {
+                            Literal::Negative(const_env.substitute_atom(atom))
+                        }
+                    })
+                    .collect();
 
-            rules.push(Rule {
-                head: substituted_head,
-                body: substituted_body,
-            });
-        }
-        Statement::Constraint(constraint) => {
-            // Substitute constants in constraint body
-            let substituted_body: Vec<_> = constraint
-                .body
-                .iter()
-                .map(|lit| match lit {
-                    Literal::Positive(atom) => Literal::Positive(const_env.substitute_atom(atom)),
-                    Literal::Negative(atom) => Literal::Negative(const_env.substitute_atom(atom)),
-                })
-                .collect();
+                rules.push(Rule {
+                    head: substituted_head,
+                    body: substituted_body,
+                });
+                Ok(())
+            }
+            Statement::Constraint(constraint) => {
+                // Substitute constants in constraint body
+                let substituted_body: Vec<_> = constraint
+                    .body
+                    .iter()
+                    .map(|lit| match lit {
+                        Literal::Positive(atom) => {
+                            Literal::Positive(const_env.substitute_atom(atom))
+                        }
+                        Literal::Negative(atom) => {
+                            Literal::Negative(const_env.substitute_atom(atom))
+                        }
+                    })
+                    .collect();
 
-            constraints.push(Constraint {
-                body: substituted_body,
-            });
-            // Constraints alone don't make it ASP - need choice rules too
-            // (Constraints can be handled by regular Datalog evaluation)
-        }
-        Statement::ChoiceRule(choice) => {
-            // Substitute constants in choice rule bounds and elements
-            let substituted_lower = choice
-                .lower_bound
-                .as_ref()
-                .map(|term| const_env.substitute_term(term));
-            let substituted_upper = choice
-                .upper_bound
-                .as_ref()
-                .map(|term| const_env.substitute_term(term));
+                constraints.push(Constraint {
+                    body: substituted_body,
+                });
+                // Constraints alone don't make it ASP - need choice rules too
+                // (Constraints can be handled by regular Datalog evaluation)
+                Ok(())
+            }
+            Statement::ChoiceRule(choice) => {
+                // Substitute constants in choice rule bounds and elements
+                let substituted_lower = choice
+                    .lower_bound
+                    .as_ref()
+                    .map(|term| const_env.substitute_term(term));
+                let substituted_upper = choice
+                    .upper_bound
+                    .as_ref()
+                    .map(|term| const_env.substitute_term(term));
 
-            let substituted_elements: Vec<_> = choice
-                .elements
-                .iter()
-                .map(|elem| {
-                    let substituted_atom = const_env.substitute_atom(&elem.atom);
-                    let substituted_condition: Vec<_> = elem
-                        .condition
-                        .iter()
-                        .map(|lit| match lit {
-                            Literal::Positive(atom) => {
-                                Literal::Positive(const_env.substitute_atom(atom))
-                            }
-                            Literal::Negative(atom) => {
-                                Literal::Negative(const_env.substitute_atom(atom))
-                            }
-                        })
-                        .collect();
+                let substituted_elements: Vec<_> = choice
+                    .elements
+                    .iter()
+                    .map(|elem| {
+                        let substituted_atom = const_env.substitute_atom(&elem.atom);
+                        let substituted_condition: Vec<_> = elem
+                            .condition
+                            .iter()
+                            .map(|lit| match lit {
+                                Literal::Positive(atom) => {
+                                    Literal::Positive(const_env.substitute_atom(atom))
+                                }
+                                Literal::Negative(atom) => {
+                                    Literal::Negative(const_env.substitute_atom(atom))
+                                }
+                            })
+                            .collect();
 
-                    proclog::ast::ChoiceElement {
-                        atom: substituted_atom,
-                        condition: substituted_condition,
-                    }
-                })
-                .collect();
+                        proclog::ast::ChoiceElement {
+                            atom: substituted_atom,
+                            condition: substituted_condition,
+                        }
+                    })
+                    .collect();
 
-            let substituted_body: Vec<_> = choice
-                .body
-                .iter()
-                .map(|lit| match lit {
-                    Literal::Positive(atom) => Literal::Positive(const_env.substitute_atom(atom)),
-                    Literal::Negative(atom) => Literal::Negative(const_env.substitute_atom(atom)),
-                })
-                .collect();
+                let substituted_body: Vec<_> = choice
+                    .body
+                    .iter()
+                    .map(|lit| match lit {
+                        Literal::Positive(atom) => {
+                            Literal::Positive(const_env.substitute_atom(atom))
+                        }
+                        Literal::Negative(atom) => {
+                            Literal::Negative(const_env.substitute_atom(atom))
+                        }
+                    })
+                    .collect();
 
-            choice_rules.push(ChoiceRule {
-                lower_bound: substituted_lower,
-                upper_bound: substituted_upper,
-                elements: substituted_elements,
-                body: substituted_body,
-            });
-            has_asp_statements = true;
-        }
-        Statement::ConstDecl(_) => {
-            // Already handled when building const_env
-        }
-        Statement::Test(_) => {
-            // Ignore embedded test blocks when preparing execution environment
+                choice_rules.push(ChoiceRule {
+                    lower_bound: substituted_lower,
+                    upper_bound: substituted_upper,
+                    elements: substituted_elements,
+                    body: substituted_body,
+                });
+                has_asp_statements = true;
+                Ok(())
+            }
+            Statement::ConstDecl(_) => {
+                // Already handled when building const_env
+                Ok(())
+            }
+            Statement::Test(_) => {
+                // Ignore embedded test blocks when preparing execution environment
+                Ok(())
+            }
         }
     };
 
     for statement in base_statements {
-        process_statement(statement);
+        if let Err(err) = process_statement(statement) {
+            return preparation_failure_result(test_block, err.message());
+        }
     }
 
     for statement in &test_block.statements {
-        match statement {
-            Statement::Test(_) => {
-                // Nested tests inside a test block are ignored
-            }
-            other => process_statement(other),
+        if let Statement::Test(_) = statement {
+            // Nested tests inside a test block are ignored
+            continue;
+        }
+
+        if let Err(err) = process_statement(statement) {
+            return preparation_failure_result(test_block, err.message());
         }
     }
 
@@ -258,6 +305,31 @@ pub fn run_test_block(base_statements: &[Statement], test_block: &TestBlock) -> 
         passed: all_passed,
         total_cases: test_block.test_cases.len(),
         passed_cases: passed_count,
+        case_results,
+    }
+}
+
+fn preparation_failure_result(test_block: &TestBlock, error_message: String) -> TestResult {
+    let case_results: Vec<TestCaseResult> = test_block
+        .test_cases
+        .iter()
+        .map(|test_case| {
+            let query_text = format_query(&test_case.query);
+            TestCaseResult {
+                passed: false,
+                message: format!(
+                    "✗ Failed to prepare test inputs before running {}: {}",
+                    query_text, error_message
+                ),
+            }
+        })
+        .collect();
+
+    TestResult {
+        test_name: test_block.name.clone(),
+        passed: false,
+        total_cases: test_block.test_cases.len(),
+        passed_cases: 0,
         case_results,
     }
 }
@@ -783,10 +855,59 @@ fn format_query(query: &proclog::ast::Query) -> String {
     format!("?- {}.", literals.join(", "))
 }
 
+fn format_atom_pretty(atom: &Atom) -> String {
+    let predicate = atom.predicate.as_ref();
+    if atom.terms.is_empty() {
+        predicate.to_string()
+    } else {
+        let terms = atom
+            .terms
+            .iter()
+            .map(format_term_pretty)
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("{}({})", predicate, terms)
+    }
+}
+
+fn format_term_pretty(term: &Term) -> String {
+    match term {
+        Term::Variable(name) => name.as_ref().to_string(),
+        Term::Constant(value) => match value {
+            Value::Integer(i) => i.to_string(),
+            Value::Float(f) => {
+                let mut s = f.to_string();
+                if !s.contains('.') && !s.contains('e') && !s.contains('E') {
+                    s.push_str(".0");
+                }
+                s
+            }
+            Value::Boolean(b) => b.to_string(),
+            Value::String(s) => format!("\"{}\"", s.as_ref()),
+            Value::Atom(a) => a.as_ref().to_string(),
+        },
+        Term::Compound(functor, args) => {
+            let rendered_args = args
+                .iter()
+                .map(format_term_pretty)
+                .collect::<Vec<_>>()
+                .join(", ");
+            if args.is_empty() {
+                functor.as_ref().to_string()
+            } else {
+                format!("{}({})", functor.as_ref(), rendered_args)
+            }
+        }
+        Term::Range(start, end) => {
+            format!("{}..{}", format_term_pretty(start), format_term_pretty(end))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use proclog::ast::*;
+    use proclog::ast::{Literal, Rule, Statement, Term, Value};
     use proclog::parser::parse_program;
 
     #[test]
@@ -1032,6 +1153,86 @@ mod tests {
             result.case_results
         );
         assert_eq!(result.passed_cases, 1);
+    }
+
+    #[test]
+    fn test_non_ground_fact_in_test_block_reports_error() {
+        let input = r#"
+            #test "non-ground fact" {
+                parent(X, mary).
+
+                ?- parent(john, mary).
+                + true.
+            }
+        "#;
+
+        let program = parse_program(input).expect("Parse failed");
+        let test_block = match &program.statements[0] {
+            Statement::Test(tb) => tb,
+            _ => panic!("Expected test block"),
+        };
+
+        let result = run_test_block(&[], test_block);
+        assert!(
+            !result.passed,
+            "Test should fail due to non-ground fact: {:?}",
+            result.case_results
+        );
+        assert_eq!(result.passed_cases, 0);
+        assert!(!result.case_results.is_empty());
+        let message = &result.case_results[0].message;
+        assert!(
+            message.contains("Failed to prepare test inputs"),
+            "Expected preparation failure message, got: {}",
+            message
+        );
+        assert!(
+            message.contains("non-ground fact parent(X, mary)"),
+            "Expected non-ground fact details in message, got: {}",
+            message
+        );
+    }
+
+    #[test]
+    fn test_non_ground_fact_in_base_program_reports_error() {
+        let input = r#"
+            parent(X, mary).
+
+            #test "non-ground base" {
+                ?- parent(john, mary).
+                + true.
+            }
+        "#;
+
+        let program = parse_program(input).expect("Parse failed");
+        let mut base_statements = Vec::new();
+        let mut test_block = None;
+
+        for statement in &program.statements {
+            match statement {
+                Statement::Test(tb) => {
+                    test_block = Some(tb.clone());
+                }
+                other => base_statements.push(other.clone()),
+            }
+        }
+
+        let test_block = test_block.expect("Expected test block");
+        let result = run_test_block(&base_statements, &test_block);
+
+        assert!(
+            !result.passed,
+            "Test should fail due to non-ground base fact: {:?}",
+            result.case_results
+        );
+        assert_eq!(result.passed_cases, 0);
+        assert!(!result.case_results.is_empty());
+        let message = &result.case_results[0].message;
+        assert!(
+            message.contains("non-ground fact parent(X, mary)"),
+            "Expected non-ground fact details in message, got: {}",
+            message
+        );
     }
 
     #[test]
