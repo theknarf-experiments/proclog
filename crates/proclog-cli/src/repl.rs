@@ -1,12 +1,12 @@
-use crate::asp::{asp_evaluation, AnswerSet};
-use crate::ast::{Constraint, Literal, Query, Rule, Statement, Symbol, Term, Value};
-use crate::constants::ConstantEnv;
-use crate::database::FactDatabase;
-use crate::evaluation::stratified_evaluation_with_constraints;
-use crate::parser::{parse_program, parse_query};
-use crate::query::{evaluate_query, query_variables};
-use crate::unification::Substitution;
 use chumsky::error::Simple;
+use proclog::asp::{asp_evaluation, AnswerSet};
+use proclog::ast::{Constraint, Literal, Query, Rule, Statement, Symbol, Term, Value};
+use proclog::constants::ConstantEnv;
+use proclog::database::FactDatabase;
+use proclog::evaluation::stratified_evaluation_with_constraints;
+use proclog::parser::{parse_program, parse_query};
+use proclog::query::{evaluate_query, query_variables};
+use proclog::unification::Substitution;
 
 /// Kind of response produced by the REPL engine.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -270,27 +270,27 @@ impl ReplEngine {
                                 .condition
                                 .iter()
                                 .map(|lit| match lit {
-                                    crate::ast::Literal::Positive(atom) => {
-                                        crate::ast::Literal::Positive(
+                                    proclog::ast::Literal::Positive(atom) => {
+                                        proclog::ast::Literal::Positive(
                                             const_env.substitute_atom(atom),
                                         )
                                     }
-                                    crate::ast::Literal::Negative(atom) => {
-                                        crate::ast::Literal::Negative(
+                                    proclog::ast::Literal::Negative(atom) => {
+                                        proclog::ast::Literal::Negative(
                                             const_env.substitute_atom(atom),
                                         )
                                     }
                                 })
                                 .collect();
 
-                            crate::ast::ChoiceElement {
+                            proclog::ast::ChoiceElement {
                                 atom: substituted_atom,
                                 condition: substituted_condition,
                             }
                         })
                         .collect();
 
-                    choice_rules.push(crate::ast::ChoiceRule {
+                    choice_rules.push(proclog::ast::ChoiceRule {
                         lower_bound: substituted_lower,
                         upper_bound: substituted_upper,
                         elements: substituted_elements,
@@ -317,7 +317,7 @@ impl ReplEngine {
 
             // Add facts
             for atom in base_facts.all_facts() {
-                statements.push(Statement::Fact(crate::ast::Fact { atom: atom.clone() }));
+                statements.push(Statement::Fact(proclog::ast::Fact { atom: atom.clone() }));
             }
 
             // Add rules
@@ -335,7 +335,7 @@ impl ReplEngine {
                 statements.push(Statement::ChoiceRule(choice.clone()));
             }
 
-            let program = crate::ast::Program { statements };
+            let program = proclog::ast::Program { statements };
             CompiledResult::Asp(asp_evaluation(&program))
         } else {
             // Use regular Datalog evaluation

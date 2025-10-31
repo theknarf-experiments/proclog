@@ -15,8 +15,11 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Run cargo test
-        run: cargo test --locked
+      - name: Run ProcLog library tests
+        run: cargo test --locked -p proclog
+
+      - name: Run ProcLog CLI tests
+        run: cargo test --locked -p proclog-cli
 
       - name: Install just
         uses: taiki-e/install-action@v2

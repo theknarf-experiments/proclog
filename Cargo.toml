@@ -1,15 +1,14 @@
-[package]
-name = "proclog"
-version = "0.1.0"
-edition = "2021"
+[workspace]
+members = [
+    "crates/proclog",
+    "crates/proclog-cli",
+]
+resolver = "2"
 
-[dependencies]
+[workspace.dependencies]
 chumsky = "0.9"
 internment = "0.8"
-ariadne = "0.4"
 crossterm = "0.27"
 ratatui = { path = "vendor/ratatui" }
 clap = { version = "4.5", features = ["derive"] }
 notify = "6"
-
-[dev-dependencies]

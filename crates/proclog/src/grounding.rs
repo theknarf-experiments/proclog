@@ -505,7 +505,7 @@ pub fn ground_choice_rule(
 /// returns N groups, one per body substitution.
 ///
 /// Example:
-/// ```
+/// ```text
 /// % 1 { has_weapon(P, W) : weapon(W) } 1 :- player(P).
 /// % With player(alice), player(bob), weapon(sword), weapon(bow)
 /// % Returns:

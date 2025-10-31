@@ -1,32 +1,8 @@
-mod asp;
-mod ast;
-mod builtins;
 mod cli;
-mod constants;
-mod database;
-mod evaluation;
-mod grounding;
-mod parser;
-mod query;
 mod repl;
-mod safety;
-mod stratification;
 mod test_runner;
-mod unification;
 
 use clap::{Parser, Subcommand};
-
-#[cfg(test)]
-mod asp_multiple_choice_tests;
-
-#[cfg(test)]
-mod arithmetic_integration_tests;
-
-#[cfg(test)]
-mod choice_constant_bounds_tests;
-
-#[cfg(test)]
-mod query_integration_tests;
 
 pub(crate) const COLOR_RESET: &str = "\x1b[0m";
 pub(crate) const COLOR_GREEN: &str = "\x1b[32m";

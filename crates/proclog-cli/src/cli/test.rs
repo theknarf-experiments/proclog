@@ -1,6 +1,7 @@
-use crate::{ast, parser, test_runner};
+use crate::test_runner;
 use crate::{COLOR_CYAN, COLOR_GREEN, COLOR_RED, COLOR_RESET, COLOR_YELLOW};
 use notify::{recommended_watcher, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use proclog::{ast, parser};
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};

@@ -57,13 +57,13 @@ cargo test
 You can start it in REPL mode:
 
 ```bash
-cargo run -q -- repl ./examples/01_basic_facts.pl
+cargo run -q -p proclog-cli -- repl ./examples/01_basic_facts.pl
 ```
 
 Or use the built inn test runner:
 
 ```bash
-cargo run -q -- test ./examples/01_basic_facts.pl
+cargo run -q -p proclog-cli -- test ./examples/01_basic_facts.pl
 ```
 
 ## Example Programs
@@ -72,7 +72,7 @@ You'll find examples in the `examples/` directory.
 To run all examples you can run:
 
 ```bash
-cargo run -q -- test examples/*
+cargo run -q -p proclog-cli -- test examples/*
 ```
 
 ## Development Approach
