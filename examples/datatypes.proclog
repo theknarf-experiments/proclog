@@ -66,6 +66,8 @@ inventory(player1, item(potion, 3, 2.0)).
 
 position(player1, coord(10, 20, 0)).
 position(enemy1, coord(-5, 15, 10)).
+valid_coord(10, 20, 0).
+valid_coord(-5, 15, 10).
 
 % Deeply nested
 quest(player1, chain(
