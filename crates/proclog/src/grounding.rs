@@ -122,14 +122,12 @@ pub fn satisfy_body(body: &[Literal], db: &FactDatabase) -> Vec<Substitution> {
             // check that the atom (with substitution applied) doesn't match any fact
 
             if rest.is_empty() {
-                // No more literals - check if the negated atom is NOT in the database
-                let matches = db.query(atom);
-                if matches.is_empty() {
-                    // Atom is not in the database - negation succeeds with empty substitution
-                    vec![Substitution::new()]
-                } else {
+                if database_has_match(db, atom) {
                     // Atom is in the database - negation fails
                     vec![]
+                } else {
+                    // Atom is not in the database - negation succeeds with empty substitution
+                    vec![Substitution::new()]
                 }
             } else {
                 // Process the rest first, then filter by negation
@@ -138,12 +136,9 @@ pub fn satisfy_body(body: &[Literal], db: &FactDatabase) -> Vec<Substitution> {
 
                 for subst in rest_substs {
                     // Apply substitution to the negated atom
-                    let ground_atom = subst.apply_atom(atom);
+                    let applied_atom = subst.apply_atom(atom);
 
-                    // Check if this ground atom exists in the database
-                    let matches = db.query(&ground_atom);
-
-                    if matches.is_empty() {
+                    if !database_has_match(db, &applied_atom) {
                         // Atom doesn't exist - negation succeeds
                         result.push(subst);
                     }
@@ -186,6 +181,27 @@ fn combine_substs(s1: &Substitution, s2: &Substitution) -> Option<Substitution> 
     }
 
     Some(combined)
+}
+
+fn database_has_match(db: &FactDatabase, atom: &Atom) -> bool {
+    if atom_is_ground(atom) {
+        db.contains(atom)
+    } else {
+        !db.query(atom).is_empty()
+    }
+}
+
+fn atom_is_ground(atom: &Atom) -> bool {
+    atom.terms.iter().all(term_is_ground)
+}
+
+fn term_is_ground(term: &Term) -> bool {
+    match term {
+        Term::Variable(_) => false,
+        Term::Constant(_) => true,
+        Term::Range(_, _) => true,
+        Term::Compound(_, args) => args.iter().all(term_is_ground),
+    }
 }
 
 /// Apply substitution to a built-in predicate
@@ -897,6 +913,24 @@ mod tests {
 
         // polly is not a bird, so this succeeds
         assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_negated_ground_literal_avoids_query_allocations() {
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("p", vec![atom_const("a")])).unwrap();
+
+        let body = vec![
+            Literal::Positive(make_atom("p", vec![var("X")])),
+            Literal::Negative(make_atom("q", vec![var("X")])),
+        ];
+
+        let tracker = FactDatabase::track_ground_queries();
+        let substitutions = satisfy_body(&body, &db);
+
+        assert_eq!(substitutions.len(), 1);
+        assert_eq!(substitutions[0].apply(&var("X")), atom_const("a"));
+        assert_eq!(tracker.count(), 0);
     }
 
     #[test]
