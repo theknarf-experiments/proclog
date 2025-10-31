@@ -1091,6 +1091,7 @@ mod tests {
             initial_facts.clone()
         } else {
             semi_naive_evaluation(&rules_vec, initial_facts.clone())
+                .expect("semi-naive evaluation should succeed")
         };
 
         let healthy_pred = Intern::new("healthy".to_string());

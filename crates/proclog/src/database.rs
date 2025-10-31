@@ -35,7 +35,7 @@ pub struct FactDatabase {
 }
 
 /// Error type for failed fact insertions
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InsertError {
     /// Attempted to insert an atom containing variables
     NonGroundAtom(Atom),
@@ -78,6 +78,16 @@ impl FactDatabase {
             .entry(atom.predicate.clone())
             .or_insert_with(HashSet::new)
             .insert(atom))
+    }
+
+    /// Merge another fact database into this one, consuming the other database.
+    pub fn absorb(&mut self, mut other: FactDatabase) {
+        for (predicate, mut facts) in other.facts_by_predicate.drain() {
+            self.facts_by_predicate
+                .entry(predicate)
+                .or_insert_with(HashSet::new)
+                .extend(facts.drain());
+        }
     }
 
     /// Check if a fact exists in the database

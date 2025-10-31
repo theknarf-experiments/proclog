@@ -16,12 +16,12 @@
 //! # Example
 //!
 //! ```ignore
-//! let result = semi_naive_evaluation(&rules, initial_facts);
+//! let result = semi_naive_evaluation(&rules, initial_facts)?;
 //! let result = stratified_evaluation_with_constraints(&rules, &constraints, initial_facts)?;
 //! ```
 
 use crate::ast::{Constraint, Rule};
-use crate::database::FactDatabase;
+use crate::database::{FactDatabase, InsertError};
 use crate::grounding::{ground_rule, ground_rule_semi_naive, satisfy_body};
 use crate::safety::{check_program_safety, SafetyError};
 use crate::stratification::{stratify, StratificationError};
@@ -33,6 +33,8 @@ pub enum EvaluationError {
     Safety(SafetyError),
     /// Program is not stratifiable (cycle through negation)
     Stratification(StratificationError),
+    /// Derived a non-ground fact during evaluation
+    Derivation(InsertError),
     /// Constraint violation (integrity constraint failed)
     ConstraintViolation {
         constraint: String,
@@ -45,6 +47,7 @@ impl std::fmt::Display for EvaluationError {
         match self {
             EvaluationError::Safety(e) => write!(f, "Safety error: {}", e),
             EvaluationError::Stratification(e) => write!(f, "Stratification error: {:?}", e),
+            EvaluationError::Derivation(e) => write!(f, "Derivation error: {}", e),
             EvaluationError::ConstraintViolation {
                 constraint,
                 violation_count,
@@ -70,6 +73,12 @@ impl From<SafetyError> for EvaluationError {
 impl From<StratificationError> for EvaluationError {
     fn from(e: StratificationError) -> Self {
         EvaluationError::Stratification(e)
+    }
+}
+
+impl From<InsertError> for EvaluationError {
+    fn from(e: InsertError) -> Self {
+        EvaluationError::Derivation(e)
     }
 }
 
@@ -112,7 +121,10 @@ pub fn naive_evaluation(rules: &[Rule], initial_facts: FactDatabase) -> FactData
 /// The key insight: for each rule, we need to ensure at least one literal
 /// uses the delta (new facts), while others can use the full database.
 /// This prevents re-deriving facts from old information.
-pub fn semi_naive_evaluation(rules: &[Rule], initial_facts: FactDatabase) -> FactDatabase {
+pub fn semi_naive_evaluation(
+    rules: &[Rule],
+    initial_facts: FactDatabase,
+) -> Result<FactDatabase, InsertError> {
     let mut db = initial_facts.clone();
     let mut delta = initial_facts;
 
@@ -124,29 +136,29 @@ pub fn semi_naive_evaluation(rules: &[Rule], initial_facts: FactDatabase) -> Fac
                 // No body - always evaluate
                 let derived = ground_rule(rule, &db);
                 for fact in derived {
-                    if !db.contains(&fact) {
-                        db.insert(fact.clone()).unwrap();
-                        new_delta.insert(fact).unwrap();
+                    if db.contains(&fact) || new_delta.contains(&fact) {
+                        continue;
                     }
+                    new_delta.insert(fact)?;
                 }
             } else if rule.body.len() == 1 {
                 // Single literal - just use delta
                 let derived = ground_rule(rule, &delta);
                 for fact in derived {
-                    if !db.contains(&fact) {
-                        db.insert(fact.clone()).unwrap();
-                        new_delta.insert(fact).unwrap();
+                    if db.contains(&fact) || new_delta.contains(&fact) {
+                        continue;
                     }
+                    new_delta.insert(fact)?;
                 }
             } else {
                 // Multi-literal: use semi-naive grounding
                 // This tries delta at each position
                 let derived = ground_rule_semi_naive(rule, &delta, &db);
                 for fact in derived {
-                    if !db.contains(&fact) {
-                        db.insert(fact.clone()).unwrap();
-                        new_delta.insert(fact).unwrap();
+                    if db.contains(&fact) || new_delta.contains(&fact) {
+                        continue;
                     }
+                    new_delta.insert(fact)?;
                 }
             }
         }
@@ -156,10 +168,12 @@ pub fn semi_naive_evaluation(rules: &[Rule], initial_facts: FactDatabase) -> Fac
             break;
         }
 
-        delta = new_delta;
+        let delta_next = new_delta.clone();
+        db.absorb(new_delta);
+        delta = delta_next;
     }
 
-    db
+    Ok(db)
 }
 
 /// Statistics about evaluation performance
@@ -217,7 +231,7 @@ pub fn naive_evaluation_instrumented(
 pub fn semi_naive_evaluation_instrumented(
     rules: &[Rule],
     initial_facts: FactDatabase,
-) -> (FactDatabase, EvaluationStats) {
+) -> Result<(FactDatabase, EvaluationStats), InsertError> {
     let mut db = initial_facts.clone();
     let mut delta = initial_facts;
     let mut stats = EvaluationStats {
@@ -228,7 +242,6 @@ pub fn semi_naive_evaluation_instrumented(
 
     loop {
         let mut new_delta = FactDatabase::new();
-        stats.iterations += 1;
 
         for rule in rules {
             stats.rule_applications += 1;
@@ -236,29 +249,29 @@ pub fn semi_naive_evaluation_instrumented(
             if rule.body.is_empty() {
                 let derived = ground_rule(rule, &db);
                 for fact in derived {
-                    if !db.contains(&fact) {
-                        db.insert(fact.clone()).unwrap();
-                        new_delta.insert(fact).unwrap();
-                        stats.facts_derived += 1;
+                    if db.contains(&fact) || new_delta.contains(&fact) {
+                        continue;
                     }
+                    new_delta.insert(fact)?;
+                    stats.facts_derived += 1;
                 }
             } else if rule.body.len() == 1 {
                 let derived = ground_rule(rule, &delta);
                 for fact in derived {
-                    if !db.contains(&fact) {
-                        db.insert(fact.clone()).unwrap();
-                        new_delta.insert(fact).unwrap();
-                        stats.facts_derived += 1;
+                    if db.contains(&fact) || new_delta.contains(&fact) {
+                        continue;
                     }
+                    new_delta.insert(fact)?;
+                    stats.facts_derived += 1;
                 }
             } else {
                 let derived = ground_rule_semi_naive(rule, &delta, &db);
                 for fact in derived {
-                    if !db.contains(&fact) {
-                        db.insert(fact.clone()).unwrap();
-                        new_delta.insert(fact).unwrap();
-                        stats.facts_derived += 1;
+                    if db.contains(&fact) || new_delta.contains(&fact) {
+                        continue;
                     }
+                    new_delta.insert(fact)?;
+                    stats.facts_derived += 1;
                 }
             }
         }
@@ -267,10 +280,13 @@ pub fn semi_naive_evaluation_instrumented(
             break;
         }
 
-        delta = new_delta;
+        stats.iterations += 1;
+        let delta_next = new_delta.clone();
+        db.absorb(new_delta);
+        delta = delta_next;
     }
 
-    (db, stats)
+    Ok((db, stats))
 }
 
 /// Check constraints against the database
@@ -310,7 +326,7 @@ pub fn stratified_evaluation_with_constraints(
     // Evaluate each stratum to completion before moving to next
     for stratum_rules in &stratification.rules_by_stratum {
         // Evaluate this stratum to fixed point using semi-naive
-        db = semi_naive_evaluation(stratum_rules, db);
+        db = semi_naive_evaluation(stratum_rules, db).map_err(EvaluationError::from)?;
     }
 
     // Check constraints after evaluation
@@ -341,7 +357,7 @@ pub fn stratified_evaluation(
     // Evaluate each stratum to completion before moving to next
     for stratum_rules in &stratification.rules_by_stratum {
         // Evaluate this stratum to fixed point using semi-naive
-        db = semi_naive_evaluation(stratum_rules, db);
+        db = semi_naive_evaluation(stratum_rules, db).map_err(EvaluationError::from)?;
     }
 
     Ok(db)
@@ -351,6 +367,7 @@ pub fn stratified_evaluation(
 mod tests {
     use super::*;
     use crate::ast::{Atom, Literal, Term, Value};
+    use crate::database::InsertError;
     use internment::Intern;
 
     // Helper functions
@@ -497,7 +514,8 @@ mod tests {
         .unwrap();
 
         let rules = vec![];
-        let result = semi_naive_evaluation(&rules, db.clone());
+        let result = semi_naive_evaluation(&rules, db.clone())
+            .expect("semi-naive evaluation should succeed");
 
         assert_eq!(result.len(), db.len());
     }
@@ -524,7 +542,8 @@ mod tests {
             ],
         )];
 
-        let result = semi_naive_evaluation(&rules, db);
+        let result =
+            semi_naive_evaluation(&rules, db).expect("semi-naive evaluation should succeed");
 
         assert_eq!(result.len(), 3);
 
@@ -560,13 +579,26 @@ mod tests {
             ),
         ];
 
-        let result = semi_naive_evaluation(&rules, db);
+        let result =
+            semi_naive_evaluation(&rules, db).expect("semi-naive evaluation should succeed");
 
         let path_pred = Intern::new("path".to_string());
         let paths = result.get_by_predicate(&path_pred);
 
         // Should derive same 6 paths as naive evaluation
         assert_eq!(paths.len(), 6);
+    }
+
+    #[test]
+    fn test_semi_naive_evaluation_reports_non_ground_error() {
+        let db = FactDatabase::new();
+        let rules = vec![make_rule(make_atom("bad", vec![var("X")]), vec![])];
+
+        let err = semi_naive_evaluation(&rules, db).expect_err("expected derivation error");
+
+        assert!(
+            matches!(err, InsertError::NonGroundAtom(atom) if atom.predicate.as_ref() == "bad")
+        );
     }
 
     #[test]
@@ -598,7 +630,8 @@ mod tests {
         ];
 
         let naive_result = naive_evaluation(&rules, db.clone());
-        let semi_naive_result = semi_naive_evaluation(&rules, db);
+        let semi_naive_result =
+            semi_naive_evaluation(&rules, db).expect("semi-naive evaluation should succeed");
 
         // Both should produce same number of facts
         assert_eq!(naive_result.len(), semi_naive_result.len());
@@ -655,7 +688,8 @@ mod tests {
         assert_eq!(rules.len(), 3);
 
         // Step 3: Evaluate using semi-naive
-        let result_db = semi_naive_evaluation(&rules, initial_db);
+        let result_db = semi_naive_evaluation(&rules, initial_db)
+            .expect("semi-naive evaluation should succeed");
 
         // Step 4: Verify results
         // Should have:
@@ -718,7 +752,8 @@ mod tests {
         ];
 
         let (naive_result, naive_stats) = naive_evaluation_instrumented(&rules, db.clone());
-        let (semi_naive_result, semi_naive_stats) = semi_naive_evaluation_instrumented(&rules, db);
+        let (semi_naive_result, semi_naive_stats) = semi_naive_evaluation_instrumented(&rules, db)
+            .expect("semi-naive evaluation should succeed");
 
         // Both should produce same facts
         assert_eq!(naive_result.len(), semi_naive_result.len());
@@ -763,7 +798,8 @@ mod tests {
             ),
         ];
 
-        let (result, stats) = semi_naive_evaluation_instrumented(&rules, db);
+        let (result, stats) = semi_naive_evaluation_instrumented(&rules, db)
+            .expect("semi-naive evaluation should succeed");
 
         // facts_derived should equal total facts minus initial facts
         let initial_facts = 2; // 2 edges
@@ -808,7 +844,8 @@ mod tests {
             ),
         ];
 
-        let result = semi_naive_evaluation(&rules, db);
+        let result =
+            semi_naive_evaluation(&rules, db).expect("semi-naive evaluation should succeed");
 
         // Should derive path(a,c) by combining path(a,b) + edge(b,c)
         // This requires using delta at position 0 (path literal)
@@ -857,7 +894,8 @@ mod tests {
         ];
 
         let (naive_result, _) = naive_evaluation_instrumented(&rules, db.clone());
-        let (semi_naive_result, _) = semi_naive_evaluation_instrumented(&rules, db);
+        let (semi_naive_result, _) = semi_naive_evaluation_instrumented(&rules, db)
+            .expect("semi-naive evaluation should succeed");
 
         // Must derive same facts
         assert_eq!(naive_result.len(), semi_naive_result.len());
@@ -920,7 +958,8 @@ mod tests {
             ),
         ];
 
-        let (result, stats) = semi_naive_evaluation_instrumented(&rules, db);
+        let (result, stats) = semi_naive_evaluation_instrumented(&rules, db)
+            .expect("semi-naive evaluation should succeed");
 
         // Should derive all ancestor relationships
         // alice->bob, bob->charlie, charlie->dave (from rule 1)
@@ -977,7 +1016,8 @@ mod tests {
         }
 
         // Evaluate
-        let result_db = semi_naive_evaluation(&rules, initial_db);
+        let result_db = semi_naive_evaluation(&rules, initial_db)
+            .expect("semi-naive evaluation should succeed");
 
         // Query for all ancestors of eve
         let query = make_atom("ancestor", vec![var("X"), atom_const("eve")]);
@@ -1493,7 +1533,8 @@ mod tests {
             ),
         ];
 
-        let (_result, stats) = semi_naive_evaluation_instrumented(&rules[0..2], db.clone());
+        let (_result, stats) = semi_naive_evaluation_instrumented(&rules[0..2], db.clone())
+            .expect("semi-naive evaluation should succeed");
 
         // Stratum 0 should converge in ~10 iterations (length of chain)
         println!("Stratum 0 stats: {:?}", stats);
@@ -1773,7 +1814,8 @@ mod tests {
             ),
         ];
 
-        let result = semi_naive_evaluation(&rules, db);
+        let result =
+            semi_naive_evaluation(&rules, db).expect("semi-naive evaluation should succeed");
 
         // Verify integer matching worked
         assert!(result.contains(&make_atom("healthy", vec![atom_const("player")])));
@@ -1920,7 +1962,8 @@ mod tests {
             ),
         ];
 
-        let result = semi_naive_evaluation(&rules, db);
+        let result =
+            semi_naive_evaluation(&rules, db).expect("semi-naive evaluation should succeed");
 
         // Should derive path from node(a,1) to node(c,3)
         assert!(result.contains(&make_atom(
@@ -2655,7 +2698,8 @@ mod tests {
             ),
         ];
 
-        let (result, stats) = semi_naive_evaluation_instrumented(&rules, db);
+        let (result, stats) = semi_naive_evaluation_instrumented(&rules, db)
+            .expect("semi-naive evaluation should succeed");
 
         // Check that semi-naive is efficient
         // Should converge in approximately 50 iterations (length of chain)
