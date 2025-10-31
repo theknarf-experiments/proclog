@@ -6,8 +6,8 @@
 use internment::Intern;
 use proclog::asp::{asp_evaluation, AnswerSet};
 use proclog::ast::{
-    Atom, ChoiceRule, Constraint, Literal, Rule, Statement, Symbol, Term, TestBlock, TestCase,
-    Value,
+    Atom, ChoiceElement, ChoiceRule, Constraint, Literal, Rule, Statement, Symbol, Term,
+    TestBlock, TestCase, Value,
 };
 use proclog::builtins;
 use proclog::constants::ConstantEnv;
@@ -67,6 +67,55 @@ impl PreparationError {
     }
 }
 
+fn substitute_literal(const_env: &ConstantEnv, literal: &Literal) -> Literal {
+    match literal {
+        Literal::Positive(atom) => Literal::Positive(const_env.substitute_atom(atom)),
+        Literal::Negative(atom) => Literal::Negative(const_env.substitute_atom(atom)),
+    }
+}
+
+fn substitute_literals(const_env: &ConstantEnv, literals: &[Literal]) -> Vec<Literal> {
+    literals
+        .iter()
+        .map(|literal| substitute_literal(const_env, literal))
+        .collect()
+}
+
+fn substitute_constraint(const_env: &ConstantEnv, constraint: &Constraint) -> Constraint {
+    Constraint {
+        body: substitute_literals(const_env, &constraint.body),
+    }
+}
+
+fn substitute_choice_rule(const_env: &ConstantEnv, choice_rule: &ChoiceRule) -> ChoiceRule {
+    ChoiceRule {
+        lower_bound: choice_rule
+            .lower_bound
+            .as_ref()
+            .map(|term| const_env.substitute_term(term)),
+        upper_bound: choice_rule
+            .upper_bound
+            .as_ref()
+            .map(|term| const_env.substitute_term(term)),
+        elements: choice_rule
+            .elements
+            .iter()
+            .map(|element| substitute_choice_element(const_env, element))
+            .collect(),
+        body: substitute_literals(const_env, &choice_rule.body),
+    }
+}
+
+fn substitute_choice_element(
+    const_env: &ConstantEnv,
+    element: &ChoiceElement,
+) -> ChoiceElement {
+    ChoiceElement {
+        atom: const_env.substitute_atom(&element.atom),
+        condition: substitute_literals(const_env, &element.condition),
+    }
+}
+
 /// Run a test block and return results
 pub fn run_test_block(base_statements: &[Statement], test_block: &TestBlock) -> TestResult {
     // Build constant environment from base program + test statements
@@ -100,18 +149,7 @@ pub fn run_test_block(base_statements: &[Statement], test_block: &TestBlock) -> 
             Statement::Rule(rule) => {
                 // Substitute constants in rule
                 let substituted_head = const_env.substitute_atom(&rule.head);
-                let substituted_body: Vec<_> = rule
-                    .body
-                    .iter()
-                    .map(|lit| match lit {
-                        Literal::Positive(atom) => {
-                            Literal::Positive(const_env.substitute_atom(atom))
-                        }
-                        Literal::Negative(atom) => {
-                            Literal::Negative(const_env.substitute_atom(atom))
-                        }
-                    })
-                    .collect();
+                let substituted_body = substitute_literals(&const_env, &rule.body);
 
                 rules.push(Rule {
                     head: substituted_head,
@@ -121,81 +159,14 @@ pub fn run_test_block(base_statements: &[Statement], test_block: &TestBlock) -> 
             }
             Statement::Constraint(constraint) => {
                 // Substitute constants in constraint body
-                let substituted_body: Vec<_> = constraint
-                    .body
-                    .iter()
-                    .map(|lit| match lit {
-                        Literal::Positive(atom) => {
-                            Literal::Positive(const_env.substitute_atom(atom))
-                        }
-                        Literal::Negative(atom) => {
-                            Literal::Negative(const_env.substitute_atom(atom))
-                        }
-                    })
-                    .collect();
-
-                constraints.push(Constraint {
-                    body: substituted_body,
-                });
+                constraints.push(substitute_constraint(&const_env, constraint));
                 // Constraints alone don't make it ASP - need choice rules too
                 // (Constraints can be handled by regular Datalog evaluation)
                 Ok(())
             }
             Statement::ChoiceRule(choice) => {
                 // Substitute constants in choice rule bounds and elements
-                let substituted_lower = choice
-                    .lower_bound
-                    .as_ref()
-                    .map(|term| const_env.substitute_term(term));
-                let substituted_upper = choice
-                    .upper_bound
-                    .as_ref()
-                    .map(|term| const_env.substitute_term(term));
-
-                let substituted_elements: Vec<_> = choice
-                    .elements
-                    .iter()
-                    .map(|elem| {
-                        let substituted_atom = const_env.substitute_atom(&elem.atom);
-                        let substituted_condition: Vec<_> = elem
-                            .condition
-                            .iter()
-                            .map(|lit| match lit {
-                                Literal::Positive(atom) => {
-                                    Literal::Positive(const_env.substitute_atom(atom))
-                                }
-                                Literal::Negative(atom) => {
-                                    Literal::Negative(const_env.substitute_atom(atom))
-                                }
-                            })
-                            .collect();
-
-                        proclog::ast::ChoiceElement {
-                            atom: substituted_atom,
-                            condition: substituted_condition,
-                        }
-                    })
-                    .collect();
-
-                let substituted_body: Vec<_> = choice
-                    .body
-                    .iter()
-                    .map(|lit| match lit {
-                        Literal::Positive(atom) => {
-                            Literal::Positive(const_env.substitute_atom(atom))
-                        }
-                        Literal::Negative(atom) => {
-                            Literal::Negative(const_env.substitute_atom(atom))
-                        }
-                    })
-                    .collect();
-
-                choice_rules.push(ChoiceRule {
-                    lower_bound: substituted_lower,
-                    upper_bound: substituted_upper,
-                    elements: substituted_elements,
-                    body: substituted_body,
-                });
+                choice_rules.push(substitute_choice_rule(&const_env, choice));
                 has_asp_statements = true;
                 Ok(())
             }
@@ -342,15 +313,7 @@ fn run_test_case_asp(
     const_env: &ConstantEnv,
 ) -> TestCaseResult {
     // Substitute constants in query
-    let query_body: Vec<_> = test_case
-        .query
-        .body
-        .iter()
-        .map(|lit| match lit {
-            Literal::Positive(atom) => Literal::Positive(const_env.substitute_atom(atom)),
-            Literal::Negative(atom) => Literal::Negative(const_env.substitute_atom(atom)),
-        })
-        .collect();
+    let query_body = substitute_literals(const_env, &test_case.query.body);
 
     let query = proclog::ast::Query { body: query_body };
 
@@ -796,6 +759,10 @@ fn check_assertions(
 ) -> (Vec<Atom>, Vec<Atom>) {
     let mut positive_failures = Vec::new();
     let mut negative_failures = Vec::new();
+    let substituted_query_body = substitute_literals(const_env, &test_case.query.body);
+    let query_atom_for_assertions = substituted_query_body
+        .get(0)
+        .map(|literal| literal.atom().clone());
 
     // Check positive assertions (should be in results)
     for assertion in &test_case.positive_assertions {
@@ -809,8 +776,10 @@ fn check_assertions(
         } else {
             // Check if this atom matches any result
             let matches = results.iter().any(|subst| {
-                let instantiated = subst.apply_atom(&test_case.query.body[0].atom());
-                atoms_match(&instantiated, &substituted)
+                query_atom_for_assertions.as_ref().map_or(false, |query_atom| {
+                    let instantiated = subst.apply_atom(query_atom);
+                    atoms_match(&instantiated, &substituted)
+                })
             });
 
             if !matches {
@@ -825,8 +794,10 @@ fn check_assertions(
 
         // Check if this atom matches any result
         let matches = results.iter().any(|subst| {
-            let instantiated = subst.apply_atom(&test_case.query.body[0].atom());
-            atoms_match(&instantiated, &substituted)
+            query_atom_for_assertions.as_ref().map_or(false, |query_atom| {
+                let instantiated = subst.apply_atom(query_atom);
+                atoms_match(&instantiated, &substituted)
+            })
         });
 
         if matches {
@@ -984,6 +955,88 @@ mod tests {
             "Expected constraint failure message, got: {}",
             result.case_results[0].message
         );
+    }
+
+    #[test]
+    fn test_constraint_constant_substitution() {
+        let input = r#"
+            #test "constraint constant" {
+                #const banned = bob.
+                parent(bob).
+                :- parent(banned).
+
+                ?- parent(bob).
+                + true.
+            }
+        "#;
+
+        let program = parse_program(input).expect("Parse failed");
+        let test_block = match &program.statements[0] {
+            Statement::Test(tb) => tb,
+            _ => panic!("Expected test block"),
+        };
+
+        let result = run_test_block(&[], test_block);
+        assert!(
+            !result.passed,
+            "Test should fail due to constraint with substituted constant: {:?}",
+            result.case_results
+        );
+    }
+
+    #[test]
+    fn test_choice_rule_constant_substitution() {
+        let input = r#"
+            #test "choice rule constants" {
+                #const required = 1.
+                #const flag_value = ready.
+
+                option(a).
+                guard(ready, a).
+                state(ready).
+
+                required { choose(X) : option(X), guard(flag_value, X) } required :- state(flag_value).
+
+                ?- choose(X).
+                + choose(a).
+            }
+        "#;
+
+        let program = parse_program(input).expect("Parse failed");
+        let test_block = match &program.statements[0] {
+            Statement::Test(tb) => tb,
+            _ => panic!("Expected test block"),
+        };
+
+        let result = run_test_block(&[], test_block);
+        assert!(
+            result.passed,
+            "Choice rule with constant substitution should succeed: {:?}",
+            result.case_results
+        );
+    }
+
+    #[test]
+    fn test_query_constant_substitution() {
+        let input = r#"
+            #test "query constant" {
+                #const target = bob.
+                parent(bob).
+
+                ?- parent(target).
+                + parent(bob).
+            }
+        "#;
+
+        let program = parse_program(input).expect("Parse failed");
+        let test_block = match &program.statements[0] {
+            Statement::Test(tb) => tb,
+            _ => panic!("Expected test block"),
+        };
+
+        let result = run_test_block(&[], test_block);
+        assert!(result.passed, "Query constants should be substituted");
+        assert_eq!(result.passed_cases, 1);
     }
 
     #[test]
