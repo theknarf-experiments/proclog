@@ -68,6 +68,21 @@ impl PreparationError {
     }
 }
 
+#[derive(Debug, Clone)]
+struct PreparedTestEnv {
+    const_env: ConstantEnv,
+    initial_facts: FactDatabase,
+    rules: Vec<Rule>,
+    constraints: Vec<Constraint>,
+    choice_rules: Vec<ChoiceRule>,
+}
+
+impl PreparedTestEnv {
+    fn has_asp_statements(&self) -> bool {
+        !self.choice_rules.is_empty()
+    }
+}
+
 fn substitute_literal(const_env: &ConstantEnv, literal: &Literal) -> Literal {
     match literal {
         Literal::Positive(atom) => Literal::Positive(const_env.substitute_atom(atom)),
@@ -116,121 +131,14 @@ fn substitute_choice_element(const_env: &ConstantEnv, element: &ChoiceElement) -
 
 /// Run a test block and return results
 pub fn run_test_block(base_statements: &[Statement], test_block: &TestBlock) -> TestResult {
-    // Build constant environment from base program + test statements
-    let mut const_env = ConstantEnv::new();
-    for statement in base_statements.iter().chain(test_block.statements.iter()) {
-        if let Statement::ConstDecl(const_decl) = statement {
-            const_env.define(const_decl.name.clone(), const_decl.value.clone());
-        }
-    }
-
-    // Build initial database, rules, and ASP components from base statements + test statements
-    let mut initial_facts = FactDatabase::new();
-    let mut rules = Vec::new();
-    let mut constraints = Vec::new();
-    let mut choice_rules = Vec::new();
-    let mut has_asp_statements = false;
-
-    let mut process_statement = |statement: &Statement| -> Result<(), PreparationError> {
-        match statement {
-            Statement::Fact(fact) => {
-                let substituted = const_env.substitute_atom(&fact.atom);
-                initial_facts
-                    .insert(substituted)
-                    .map(|_| ())
-                    .map_err(|err| match err {
-                        InsertError::NonGroundAtom(atom) => {
-                            PreparationError::NonGroundFact { atom }
-                        }
-                    })
-            }
-            Statement::Rule(rule) => {
-                // Substitute constants in rule
-                let substituted_head = const_env.substitute_atom(&rule.head);
-                let substituted_body = substitute_literals(&const_env, &rule.body);
-
-                rules.push(Rule {
-                    head: substituted_head,
-                    body: substituted_body,
-                });
-                Ok(())
-            }
-            Statement::Constraint(constraint) => {
-                // Substitute constants in constraint body
-                constraints.push(substitute_constraint(&const_env, constraint));
-                // Constraints alone don't make it ASP - need choice rules too
-                // (Constraints can be handled by regular Datalog evaluation)
-                Ok(())
-            }
-            Statement::ChoiceRule(choice) => {
-                // Substitute constants in choice rule bounds and elements
-                choice_rules.push(substitute_choice_rule(&const_env, choice));
-                has_asp_statements = true;
-                Ok(())
-            }
-            Statement::ConstDecl(_) => {
-                // Already handled when building const_env
-                Ok(())
-            }
-            Statement::Test(_) => {
-                // Ignore embedded test blocks when preparing execution environment
-                Ok(())
-            }
+    let prepared = match prepare_test_environment(base_statements, test_block) {
+        Ok(env) => env,
+        Err(err) => {
+            return preparation_failure_result(test_block, err.message());
         }
     };
 
-    for statement in base_statements {
-        if let Err(err) = process_statement(statement) {
-            return preparation_failure_result(test_block, err.message());
-        }
-    }
-
-    for statement in &test_block.statements {
-        if let Statement::Test(_) = statement {
-            // Nested tests inside a test block are ignored
-            continue;
-        }
-
-        if let Err(err) = process_statement(statement) {
-            return preparation_failure_result(test_block, err.message());
-        }
-    }
-
-    // Evaluate program to get answer sets (ASP) or single database (Datalog)
-    let evaluation_result: Result<Vec<AnswerSet>, EvaluationError> = if has_asp_statements {
-        // Use ASP evaluation - construct program from collected components
-        let mut statements = Vec::new();
-
-        // Add facts
-        for atom in initial_facts.all_facts() {
-            statements.push(Statement::Fact(proclog::ast::Fact { atom: atom.clone() }));
-        }
-
-        // Add rules
-        for rule in &rules {
-            statements.push(Statement::Rule(rule.clone()));
-        }
-
-        // Add constraints
-        for constraint in &constraints {
-            statements.push(Statement::Constraint(constraint.clone()));
-        }
-
-        // Add choice rules
-        for choice in &choice_rules {
-            statements.push(Statement::ChoiceRule(choice.clone()));
-        }
-
-        let program = proclog::ast::Program { statements };
-        Ok(asp_evaluation(&program))
-    } else {
-        // Use regular Datalog evaluation with constraint checking
-        stratified_evaluation_with_constraints(&rules, &constraints, initial_facts).map(|db| {
-            vec![AnswerSet {
-                atoms: db.all_facts().into_iter().cloned().collect(),
-            }]
-        })
-    };
+    let evaluation_result = evaluate_prepared_env(&prepared);
 
     let answer_sets = match evaluation_result {
         Ok(answer_sets) => answer_sets,
@@ -260,7 +168,12 @@ pub fn run_test_block(base_statements: &[Statement], test_block: &TestBlock) -> 
     let mut passed_count = 0;
 
     for test_case in &test_block.test_cases {
-        let result = run_test_case_asp(test_case, &answer_sets, &rules, &const_env);
+        let result = run_test_case_asp(
+            test_case,
+            &answer_sets,
+            &prepared.rules,
+            &prepared.const_env,
+        );
         if result.passed {
             passed_count += 1;
         }
@@ -275,6 +188,132 @@ pub fn run_test_block(base_statements: &[Statement], test_block: &TestBlock) -> 
         total_cases: test_block.test_cases.len(),
         passed_cases: passed_count,
         case_results,
+    }
+}
+
+fn prepare_test_environment(
+    base_statements: &[Statement],
+    test_block: &TestBlock,
+) -> Result<PreparedTestEnv, PreparationError> {
+    // Build constant environment from base program + test statements
+    let mut const_env = ConstantEnv::new();
+    for statement in base_statements.iter().chain(test_block.statements.iter()) {
+        if let Statement::ConstDecl(const_decl) = statement {
+            const_env.define(const_decl.name.clone(), const_decl.value.clone());
+        }
+    }
+
+    // Build initial database, rules, and ASP components from base statements + test statements
+    let mut initial_facts = FactDatabase::new();
+    let mut rules = Vec::new();
+    let mut constraints = Vec::new();
+    let mut choice_rules = Vec::new();
+
+    let mut process_statement = |statement: &Statement| -> Result<(), PreparationError> {
+        match statement {
+            Statement::Fact(fact) => {
+                let substituted = const_env.substitute_atom(&fact.atom);
+                initial_facts
+                    .insert(substituted)
+                    .map(|_| ())
+                    .map_err(|err| match err {
+                        InsertError::NonGroundAtom(atom) => {
+                            PreparationError::NonGroundFact { atom }
+                        }
+                    })
+            }
+            Statement::Rule(rule) => {
+                // Substitute constants in rule
+                let substituted_head = const_env.substitute_atom(&rule.head);
+                let substituted_body = substitute_literals(&const_env, &rule.body);
+
+                rules.push(Rule {
+                    head: substituted_head,
+                    body: substituted_body,
+                });
+                Ok(())
+            }
+            Statement::Constraint(constraint) => {
+                // Substitute constants in constraint body
+                constraints.push(substitute_constraint(&const_env, constraint));
+                Ok(())
+            }
+            Statement::ChoiceRule(choice) => {
+                // Substitute constants in choice rule bounds and elements
+                choice_rules.push(substitute_choice_rule(&const_env, choice));
+                Ok(())
+            }
+            Statement::ConstDecl(_) => {
+                // Already handled when building const_env
+                Ok(())
+            }
+            Statement::Test(_) => {
+                // Ignore embedded test blocks when preparing execution environment
+                Ok(())
+            }
+        }
+    };
+
+    for statement in base_statements {
+        process_statement(statement)?;
+    }
+
+    for statement in &test_block.statements {
+        if let Statement::Test(_) = statement {
+            // Nested tests inside a test block are ignored
+            continue;
+        }
+
+        process_statement(statement)?;
+    }
+
+    Ok(PreparedTestEnv {
+        const_env,
+        initial_facts,
+        rules,
+        constraints,
+        choice_rules,
+    })
+}
+
+fn evaluate_prepared_env(prepared: &PreparedTestEnv) -> Result<Vec<AnswerSet>, EvaluationError> {
+    if prepared.has_asp_statements() {
+        // Use ASP evaluation - construct program from collected components
+        let mut statements = Vec::new();
+
+        // Add facts
+        for atom in prepared.initial_facts.all_facts() {
+            statements.push(Statement::Fact(proclog::ast::Fact { atom: atom.clone() }));
+        }
+
+        // Add rules
+        for rule in &prepared.rules {
+            statements.push(Statement::Rule(rule.clone()));
+        }
+
+        // Add constraints
+        for constraint in &prepared.constraints {
+            statements.push(Statement::Constraint(constraint.clone()));
+        }
+
+        // Add choice rules
+        for choice in &prepared.choice_rules {
+            statements.push(Statement::ChoiceRule(choice.clone()));
+        }
+
+        let program = proclog::ast::Program { statements };
+        Ok(asp_evaluation(&program))
+    } else {
+        // Use regular Datalog evaluation with constraint checking
+        stratified_evaluation_with_constraints(
+            &prepared.rules,
+            &prepared.constraints,
+            prepared.initial_facts.clone(),
+        )
+        .map(|db| AnswerSet {
+            atoms: db.all_facts().into_iter().cloned().collect(),
+        })
+        .map(|answer_set| vec![answer_set])
     }
 }
 
@@ -826,6 +865,105 @@ mod tests {
             terms,
         }
     }
+
+    #[test]
+    fn prepare_environment_collects_statements_and_constraints() {
+        let input = r#"
+            #test "prep constraint" {
+                parent(alice, bob).
+                :- parent(alice, carol).
+                ancestor(X, Y) :- parent(X, Y).
+
+                ?- parent(alice, bob).
+                + true.
+            }
+        "#;
+
+        let program = parse_program(input).expect("Parse failed");
+        let test_block = match &program.statements[0] {
+            Statement::Test(tb) => tb,
+            _ => panic!("Expected test block"),
+        };
+
+        let prepared =
+            prepare_test_environment(&[], test_block).expect("Environment preparation failed");
+
+        assert_eq!(prepared.initial_facts.len(), 1);
+        assert_eq!(prepared.rules.len(), 1);
+        assert_eq!(prepared.constraints.len(), 1);
+        assert!(!prepared.has_asp_statements());
+    }
+
+    #[test]
+    fn evaluate_prepared_env_runs_stratified_for_constraints() {
+        let input = r#"
+            #test "stratified" {
+                parent(alice, bob).
+                :- parent(alice, carol).
+                ancestor(X, Y) :- parent(X, Y).
+
+                ?- parent(alice, bob).
+                + true.
+            }
+        "#;
+
+        let program = parse_program(input).expect("Parse failed");
+        let test_block = match &program.statements[0] {
+            Statement::Test(tb) => tb,
+            _ => panic!("Expected test block"),
+        };
+
+        let prepared =
+            prepare_test_environment(&[], test_block).expect("Environment preparation failed");
+
+        let answer_sets = evaluate_prepared_env(&prepared).expect("Evaluation failed");
+        assert_eq!(
+            answer_sets.len(),
+            1,
+            "Stratified evaluation should return single answer set"
+        );
+
+        let parent_atom = make_atom("parent", vec![atom_const("alice"), atom_const("bob")]);
+        assert!(
+            answer_sets[0].atoms.contains(&parent_atom),
+            "Expected answer set to contain derived parent fact"
+        );
+    }
+
+    #[test]
+    fn evaluate_prepared_env_runs_asp_for_choice_rules() {
+        let input = r#"
+            #test "asp" {
+                option(a).
+                option(b).
+                1 { choose(X) : option(X) } 1.
+
+                ?- choose(X).
+                + true.
+            }
+        "#;
+
+        let program = parse_program(input).expect("Parse failed");
+        let test_block = match &program.statements[0] {
+            Statement::Test(tb) => tb,
+            _ => panic!("Expected test block"),
+        };
+
+        let prepared =
+            prepare_test_environment(&[], test_block).expect("Environment preparation failed");
+        assert!(
+            prepared.has_asp_statements(),
+            "Choice rule should enable ASP path"
+        );
+
+        let answer_sets = evaluate_prepared_env(&prepared).expect("Evaluation failed");
+        assert_eq!(
+            answer_sets.len(),
+            2,
+            "Choice rule should yield two answer sets for two options",
+        );
+    }
+
     #[test]
     fn rule_fallback_uses_library_grounding() {
         let mut db = FactDatabase::new();
