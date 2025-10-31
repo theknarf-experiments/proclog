@@ -133,99 +133,97 @@ fn operator() -> impl Parser<char, String, Error = ParseError> + Clone {
 
 // This is now handled inline within term() to avoid circular dependency issues
 
+fn factor_parser<'a>(
+    term: Recursive<'a, char, Term, ParseError>,
+) -> impl Parser<char, Term, Error = ParseError> + Clone + 'a {
+    let variable = uppercase_ident().map(|s| Term::Variable(Intern::new(s)));
+
+    let number_const = number().map(Term::Constant);
+
+    let string_const = string_literal().map(|s| Term::Constant(Value::String(Intern::new(s))));
+
+    let parens = term
+        .clone()
+        .delimited_by(just('(').padded(), just(')').padded());
+
+    let compound_or_atom = lowercase_ident()
+        .then(
+            term.clone()
+                .separated_by(just(',').padded())
+                .delimited_by(just('(').padded(), just(')').padded())
+                .or_not(),
+        )
+        .map(|(name, args)| {
+            if let Some(args) = args {
+                Term::Compound(Intern::new(name), args)
+            } else {
+                match name.as_str() {
+                    "true" => Term::Constant(Value::Boolean(true)),
+                    "false" => Term::Constant(Value::Boolean(false)),
+                    _ => Term::Constant(Value::Atom(Intern::new(name))),
+                }
+            }
+        });
+
+    choice((
+        variable,
+        number_const,
+        string_const,
+        parens,
+        compound_or_atom,
+    ))
+    .padded()
+}
+
+fn range_parser() -> impl Parser<char, Term, Error = ParseError> + Clone {
+    let range_bound = choice((
+        text::int(10).try_map(|s: String, span: std::ops::Range<usize>| {
+            s.parse::<i64>()
+                .map(|n| Term::Constant(Value::Integer(n)))
+                .map_err(|_| ParseError::custom(span, "invalid integer"))
+        }),
+        lowercase_ident().map(|s| Term::Constant(Value::Atom(Intern::new(s)))),
+    ));
+
+    range_bound
+        .clone()
+        .then_ignore(just("..").padded())
+        .then(range_bound)
+        .map(|(start, end)| Term::Range(Box::new(start), Box::new(end)))
+}
+
+fn arithmetic_parser<'a>(
+    factor: impl Parser<char, Term, Error = ParseError> + Clone + 'a,
+) -> impl Parser<char, Term, Error = ParseError> + Clone + 'a {
+    let mul_div = factor
+        .clone()
+        .then(
+            choice((just('*').to("*"), just('/').to("/"), just("mod").to("mod")))
+                .padded()
+                .then(factor.clone())
+                .repeated(),
+        )
+        .foldl(|left, (op, right)| Term::Compound(Intern::new(op.to_string()), vec![left, right]));
+
+    mul_div
+        .clone()
+        .then(
+            choice((just('+').to("+"), just('-').to("-")))
+                .padded()
+                .then(mul_div)
+                .repeated(),
+        )
+        .foldl(|left, (op, right)| Term::Compound(Intern::new(op.to_string()), vec![left, right]))
+}
+
 /// Parse a term (variable, constant, or compound) with arithmetic operator precedence
 fn term() -> impl Parser<char, Term, Error = ParseError> + Clone {
     recursive(|term| {
-        // Base factors: variables, numbers, strings, atoms, compound terms, parentheses
-        let factor = {
-            let variable = uppercase_ident().map(|s| Term::Variable(Intern::new(s)));
+        let factor = factor_parser(term.clone());
+        let range = range_parser();
+        let arithmetic = arithmetic_parser(factor);
 
-            let number_const = number().map(|v| Term::Constant(v));
-
-            let string_const =
-                string_literal().map(|s| Term::Constant(Value::String(Intern::new(s))));
-
-            // Parenthesized term
-            let parens = term
-                .clone()
-                .delimited_by(just('(').padded(), just(')').padded());
-
-            // Compound term or atom (lowercase identifier with optional args)
-            let compound_or_atom = lowercase_ident()
-                .then(
-                    term.clone()
-                        .separated_by(just(',').padded())
-                        .delimited_by(just('(').padded(), just(')').padded())
-                        .or_not(),
-                )
-                .map(|(name, args)| {
-                    if let Some(args) = args {
-                        Term::Compound(Intern::new(name), args)
-                    } else {
-                        match name.as_str() {
-                            "true" => Term::Constant(Value::Boolean(true)),
-                            "false" => Term::Constant(Value::Boolean(false)),
-                            _ => Term::Constant(Value::Atom(Intern::new(name))),
-                        }
-                    }
-                });
-
-            choice((
-                variable,
-                number_const,
-                string_const,
-                parens,
-                compound_or_atom,
-            ))
-            .padded()
-        };
-
-        // Check if we have a range (term..term) - must check before arithmetic
-        // Ranges can only have integer or atom constants as bounds
-        let range_bound = choice((
-            text::int(10).try_map(|s: String, span: std::ops::Range<usize>| {
-                s.parse::<i64>()
-                    .map(|n| Term::Constant(Value::Integer(n)))
-                    .map_err(|_| ParseError::custom(span, "invalid integer"))
-            }),
-            lowercase_ident().map(|s| Term::Constant(Value::Atom(Intern::new(s)))),
-        ));
-
-        let range = range_bound
-            .clone()
-            .then_ignore(just("..").padded())
-            .then(range_bound)
-            .map(|(start, end)| Term::Range(Box::new(start), Box::new(end)));
-
-        // Try range first, then arithmetic with precedence
-        choice((range, {
-            // Middle precedence: *, /, mod
-            let mul_div = factor
-                .clone()
-                .then(
-                    choice((just('*').to("*"), just('/').to("/"), just("mod").to("mod")))
-                        .padded()
-                        .then(factor.clone())
-                        .repeated(),
-                )
-                .foldl(|left, (op, right)| {
-                    Term::Compound(Intern::new(op.to_string()), vec![left, right])
-                });
-
-            // Lowest precedence: +, -
-            mul_div
-                .clone()
-                .then(
-                    choice((just('+').to("+"), just('-').to("-")))
-                        .padded()
-                        .then(mul_div)
-                        .repeated(),
-                )
-                .foldl(|left, (op, right)| {
-                    Term::Compound(Intern::new(op.to_string()), vec![left, right])
-                })
-        }))
-        .padded()
+        range.or(arithmetic).padded()
     })
     .labelled("term")
 }
@@ -553,7 +551,7 @@ fn choice_rule() -> impl Parser<char, Statement, Error = ParseError> + Clone {
 /// Parse a statement
 fn statement() -> impl Parser<char, Statement, Error = ParseError> + Clone {
     choice((
-        test_block(),        // Try #test first (distinctive prefix)
+        test_block(), // Try #test first (distinctive prefix)
         non_test_statement(),
     ))
     .labelled("statement")
@@ -852,6 +850,63 @@ mod tests {
             vec![
                 Term::Constant(Value::Atom(Intern::new("a".to_string()))),
                 Term::Constant(Value::Atom(Intern::new("b".to_string()))),
+            ],
+        );
+        assert_eq!(result.unwrap(), expected);
+    }
+
+    #[test]
+    fn test_parse_range_term() {
+        let result = term().parse("1..10");
+        assert!(result.is_ok());
+        match result.unwrap() {
+            Term::Range(start, end) => {
+                assert_eq!(*start, Term::Constant(Value::Integer(1)));
+                assert_eq!(*end, Term::Constant(Value::Integer(10)));
+            }
+            other => panic!("Expected range term, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_term_arithmetic_precedence_basic() {
+        let result = term().parse("1 + 2 * 3");
+        assert!(result.is_ok());
+        let expected = Term::Compound(
+            Intern::new("+".to_string()),
+            vec![
+                Term::Constant(Value::Integer(1)),
+                Term::Compound(
+                    Intern::new("*".to_string()),
+                    vec![
+                        Term::Constant(Value::Integer(2)),
+                        Term::Constant(Value::Integer(3)),
+                    ],
+                ),
+            ],
+        );
+        assert_eq!(result.unwrap(), expected);
+    }
+
+    #[test]
+    fn test_parse_mixed_term_arguments() {
+        let result = term().parse("foo(X, 1..3, Y + 4)");
+        assert!(result.is_ok());
+        let expected = Term::Compound(
+            Intern::new("foo".to_string()),
+            vec![
+                Term::Variable(Intern::new("X".to_string())),
+                Term::Range(
+                    Box::new(Term::Constant(Value::Integer(1))),
+                    Box::new(Term::Constant(Value::Integer(3))),
+                ),
+                Term::Compound(
+                    Intern::new("+".to_string()),
+                    vec![
+                        Term::Variable(Intern::new("Y".to_string())),
+                        Term::Constant(Value::Integer(4)),
+                    ],
+                ),
             ],
         );
         assert_eq!(result.unwrap(), expected);
