@@ -44,6 +44,36 @@ pub enum StratificationError {
     CycleThroughNegation(Vec<Symbol>),
 }
 
+impl std::fmt::Display for StratificationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StratificationError::CycleThroughNegation(cycle) => {
+                if cycle.is_empty() {
+                    write!(
+                        f,
+                        "Cycle through negation detected (cycle could not be reconstructed)"
+                    )
+                } else {
+                    let cycle_sequence: Vec<String> = cycle
+                        .iter()
+                        .map(|symbol| symbol.as_ref().to_string())
+                        .collect();
+                    let mut display_cycle = cycle_sequence.clone();
+                    if let Some(first) = cycle_sequence.first() {
+                        display_cycle.push(first.clone());
+                    }
+
+                    write!(
+                        f,
+                        "Cycle through negation detected: {}",
+                        display_cycle.join(" -> ")
+                    )
+                }
+            }
+        }
+    }
+}
+
 /// Dependency between predicates
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DependencyType {
@@ -375,10 +405,13 @@ mod tests {
         )];
 
         let result = stratify(&rules);
-        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.to_string(), "Cycle through negation detected: p -> p");
 
-        if let Err(StratificationError::CycleThroughNegation(cycle)) = result {
-            assert_eq!(cycle, vec![pred("p")]);
+        match err {
+            StratificationError::CycleThroughNegation(cycle) => {
+                assert_eq!(cycle, vec![pred("p")]);
+            }
         }
     }
 
