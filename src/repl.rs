@@ -1,5 +1,5 @@
-use crate::ast::{Constraint, Literal, Query, Rule, Statement, Symbol, Term, Value};
 use crate::asp::{asp_evaluation, AnswerSet};
+use crate::ast::{Constraint, Literal, Query, Rule, Statement, Symbol, Term, Value};
 use crate::constants::ConstantEnv;
 use crate::database::FactDatabase;
 use crate::evaluation::stratified_evaluation_with_constraints;
@@ -178,7 +178,7 @@ impl ReplEngine {
                             // Convert answer set to fact database for query evaluation
                             let mut db = FactDatabase::new();
                             for atom in &answer_set.atoms {
-                                db.insert(atom.clone());
+                                db.insert(atom.clone()).unwrap();
                             }
 
                             let results = evaluate_query(&substituted_query, &db);
@@ -190,10 +190,16 @@ impl ReplEngine {
                         if answer_sets.is_empty() {
                             vec![format!("No answer sets found.")]
                         } else if all_results.is_empty() {
-                            vec![format!("Query failed in all {} answer sets.", answer_set_count)]
+                            vec![format!(
+                                "Query failed in all {} answer sets.",
+                                answer_set_count
+                            )]
                         } else {
                             let mut lines = format_query_results(&substituted_query, &all_results);
-                            lines.insert(0, format!("Query succeeded in {} answer sets:", answer_set_count));
+                            lines.insert(
+                                0,
+                                format!("Query succeeded in {} answer sets:", answer_set_count),
+                            );
                             lines
                         }
                     }
@@ -225,7 +231,7 @@ impl ReplEngine {
             match statement {
                 Statement::Fact(fact) => {
                     let substituted = const_env.substitute_atom(&fact.atom);
-                    base_facts.insert(substituted);
+                    base_facts.insert(substituted).unwrap();
                 }
                 Statement::Rule(rule) => {
                     let head = const_env.substitute_atom(&rule.head);
@@ -246,23 +252,43 @@ impl ReplEngine {
                 }
                 Statement::ChoiceRule(choice) => {
                     // Substitute constants in choice rule bounds and elements
-                    let substituted_lower = choice.lower_bound.as_ref().map(|term| const_env.substitute_term(term));
-                    let substituted_upper = choice.upper_bound.as_ref().map(|term| const_env.substitute_term(term));
+                    let substituted_lower = choice
+                        .lower_bound
+                        .as_ref()
+                        .map(|term| const_env.substitute_term(term));
+                    let substituted_upper = choice
+                        .upper_bound
+                        .as_ref()
+                        .map(|term| const_env.substitute_term(term));
 
-                    let substituted_elements: Vec<_> = choice.elements.iter().map(|elem| {
-                        let substituted_atom = const_env.substitute_atom(&elem.atom);
-                        let substituted_condition: Vec<_> = elem.condition.iter()
-                            .map(|lit| match lit {
-                                crate::ast::Literal::Positive(atom) => crate::ast::Literal::Positive(const_env.substitute_atom(atom)),
-                                crate::ast::Literal::Negative(atom) => crate::ast::Literal::Negative(const_env.substitute_atom(atom)),
-                            })
-                            .collect();
+                    let substituted_elements: Vec<_> = choice
+                        .elements
+                        .iter()
+                        .map(|elem| {
+                            let substituted_atom = const_env.substitute_atom(&elem.atom);
+                            let substituted_condition: Vec<_> = elem
+                                .condition
+                                .iter()
+                                .map(|lit| match lit {
+                                    crate::ast::Literal::Positive(atom) => {
+                                        crate::ast::Literal::Positive(
+                                            const_env.substitute_atom(atom),
+                                        )
+                                    }
+                                    crate::ast::Literal::Negative(atom) => {
+                                        crate::ast::Literal::Negative(
+                                            const_env.substitute_atom(atom),
+                                        )
+                                    }
+                                })
+                                .collect();
 
-                        crate::ast::ChoiceElement {
-                            atom: substituted_atom,
-                            condition: substituted_condition,
-                        }
-                    }).collect();
+                            crate::ast::ChoiceElement {
+                                atom: substituted_atom,
+                                condition: substituted_condition,
+                            }
+                        })
+                        .collect();
 
                     choice_rules.push(crate::ast::ChoiceRule {
                         lower_bound: substituted_lower,
@@ -313,15 +339,13 @@ impl ReplEngine {
             CompiledResult::Asp(asp_evaluation(&program))
         } else {
             // Use regular Datalog evaluation
-            let derived_db = stratified_evaluation_with_constraints(&rules, &constraints, base_facts)
-                .map_err(|err| format!("Evaluation error: {}", err))?;
+            let derived_db =
+                stratified_evaluation_with_constraints(&rules, &constraints, base_facts)
+                    .map_err(|err| format!("Evaluation error: {}", err))?;
             CompiledResult::Datalog(derived_db)
         };
 
-        Ok(CompiledProgram {
-            const_env,
-            result,
-        })
+        Ok(CompiledProgram { const_env, result })
     }
 }
 
@@ -400,8 +424,6 @@ fn format_count(label: &str, count: usize) -> String {
         format!("{} {}s", count, label)
     }
 }
-
-
 
 fn substitute_literal(env: &ConstantEnv, literal: &Literal) -> Literal {
     match literal {

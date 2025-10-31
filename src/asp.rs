@@ -181,7 +181,7 @@ pub fn asp_evaluation(program: &Program) -> Vec<AnswerSet> {
                 // Expand ranges in facts
                 let expanded = crate::grounding::expand_atom_ranges(&fact.atom, &const_env);
                 for atom in expanded {
-                    base_facts.insert(atom);
+                    base_facts.insert(atom).unwrap();
                 }
             }
             Statement::Rule(rule) => {
@@ -274,7 +274,9 @@ pub fn asp_evaluation(program: &Program) -> Vec<AnswerSet> {
         // Create a database with base facts + chosen atoms
         let mut test_db = base_facts.clone();
         for atom in &candidate {
-            test_db.insert(atom.clone());
+            test_db
+                .insert(atom.clone())
+                .expect("choice candidate contained non-ground atom");
         }
 
         // Evaluate with rules and constraints

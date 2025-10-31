@@ -3,8 +3,10 @@
 //! This module implements functionality to run ProcLog tests defined with `#test` blocks.
 //! Each test block contains facts, rules, and queries with assertions to verify behavior.
 
-use crate::ast::{Atom, ChoiceRule, Constraint, Literal, Rule, Statement, Symbol, Term, TestBlock, TestCase};
 use crate::asp::{asp_evaluation, AnswerSet};
+use crate::ast::{
+    Atom, ChoiceRule, Constraint, Literal, Rule, Statement, Symbol, Term, TestBlock, TestCase,
+};
 use crate::builtins;
 use crate::constants::ConstantEnv;
 use crate::database::FactDatabase;
@@ -69,7 +71,7 @@ pub fn run_test_block(base_statements: &[Statement], test_block: &TestBlock) -> 
     let mut process_statement = |statement: &Statement| match statement {
         Statement::Fact(fact) => {
             let substituted = const_env.substitute_atom(&fact.atom);
-            initial_facts.insert(substituted);
+            initial_facts.insert(substituted).unwrap();
         }
         Statement::Rule(rule) => {
             // Substitute constants in rule
@@ -107,23 +109,39 @@ pub fn run_test_block(base_statements: &[Statement], test_block: &TestBlock) -> 
         }
         Statement::ChoiceRule(choice) => {
             // Substitute constants in choice rule bounds and elements
-            let substituted_lower = choice.lower_bound.as_ref().map(|term| const_env.substitute_term(term));
-            let substituted_upper = choice.upper_bound.as_ref().map(|term| const_env.substitute_term(term));
+            let substituted_lower = choice
+                .lower_bound
+                .as_ref()
+                .map(|term| const_env.substitute_term(term));
+            let substituted_upper = choice
+                .upper_bound
+                .as_ref()
+                .map(|term| const_env.substitute_term(term));
 
-            let substituted_elements: Vec<_> = choice.elements.iter().map(|elem| {
-                let substituted_atom = const_env.substitute_atom(&elem.atom);
-                let substituted_condition: Vec<_> = elem.condition.iter()
-                    .map(|lit| match lit {
-                        Literal::Positive(atom) => Literal::Positive(const_env.substitute_atom(atom)),
-                        Literal::Negative(atom) => Literal::Negative(const_env.substitute_atom(atom)),
-                    })
-                    .collect();
+            let substituted_elements: Vec<_> = choice
+                .elements
+                .iter()
+                .map(|elem| {
+                    let substituted_atom = const_env.substitute_atom(&elem.atom);
+                    let substituted_condition: Vec<_> = elem
+                        .condition
+                        .iter()
+                        .map(|lit| match lit {
+                            Literal::Positive(atom) => {
+                                Literal::Positive(const_env.substitute_atom(atom))
+                            }
+                            Literal::Negative(atom) => {
+                                Literal::Negative(const_env.substitute_atom(atom))
+                            }
+                        })
+                        .collect();
 
-                crate::ast::ChoiceElement {
-                    atom: substituted_atom,
-                    condition: substituted_condition,
-                }
-            }).collect();
+                    crate::ast::ChoiceElement {
+                        atom: substituted_atom,
+                        condition: substituted_condition,
+                    }
+                })
+                .collect();
 
             choice_rules.push(ChoiceRule {
                 lower_bound: substituted_lower,
@@ -254,7 +272,7 @@ fn run_test_case_asp(
         // Convert answer set to fact database for query evaluation
         let mut db = FactDatabase::new();
         for atom in &answer_set.atoms {
-            db.insert(atom.clone());
+            db.insert(atom.clone()).unwrap();
         }
 
         let results = evaluate_query(&query, &db);
@@ -316,7 +334,8 @@ fn run_test_case_asp(
     };
 
     // Check remaining assertions against the union of all results
-    let (positive_failures, negative_failures) = check_assertions(&adjusted_test_case, &all_results, const_env);
+    let (positive_failures, negative_failures) =
+        check_assertions(&adjusted_test_case, &all_results, const_env);
 
     let passed = positive_failures.is_empty() && negative_failures.is_empty();
 
@@ -352,8 +371,6 @@ fn run_test_case_asp(
 
     TestCaseResult { passed, message }
 }
-
-
 
 /// Evaluate a query against both derived facts and local rules
 fn evaluate_query_with_rules(
@@ -874,7 +891,9 @@ mod tests {
         for statement in &test_block.statements {
             match statement {
                 Statement::Fact(fact) => {
-                    initial_facts.insert(const_env.substitute_atom(&fact.atom));
+                    initial_facts
+                        .insert(const_env.substitute_atom(&fact.atom))
+                        .unwrap();
                 }
                 Statement::Rule(rule) => {
                     let head = const_env.substitute_atom(&rule.head);

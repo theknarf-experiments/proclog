@@ -14,13 +14,15 @@
 //!
 //! ```ignore
 //! let mut db = FactDatabase::new();
-//! db.insert(ground_fact);
+//! db.insert(ground_fact).unwrap();
 //! let results = db.query(&pattern_with_variables);
 //! ```
 
 use crate::ast::{Atom, Symbol, Term};
 use crate::unification::{unify_atoms, Substitution};
 use std::collections::{HashMap, HashSet};
+use std::error::Error;
+use std::fmt;
 
 /// A database of ground facts with efficient indexing
 #[derive(Debug, Clone)]
@@ -28,6 +30,25 @@ pub struct FactDatabase {
     // Index: predicate -> set of ground atoms
     facts_by_predicate: HashMap<Symbol, HashSet<Atom>>,
 }
+
+/// Error type for failed fact insertions
+#[derive(Debug)]
+pub enum InsertError {
+    /// Attempted to insert an atom containing variables
+    NonGroundAtom(Atom),
+}
+
+impl fmt::Display for InsertError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            InsertError::NonGroundAtom(atom) => {
+                write!(f, "cannot insert non-ground atom: {:?}", atom)
+            }
+        }
+    }
+}
+
+impl Error for InsertError {}
 
 impl FactDatabase {
     pub fn new() -> Self {
@@ -37,16 +58,17 @@ impl FactDatabase {
     }
 
     /// Insert a ground fact into the database
-    pub fn insert(&mut self, atom: Atom) -> bool {
+    pub fn insert(&mut self, atom: Atom) -> Result<bool, InsertError> {
         // Check that atom is ground (no variables)
         if !is_ground(&atom) {
-            return false;
+            return Err(InsertError::NonGroundAtom(atom));
         }
 
-        self.facts_by_predicate
+        Ok(self
+            .facts_by_predicate
             .entry(atom.predicate.clone())
             .or_insert_with(HashSet::new)
-            .insert(atom)
+            .insert(atom))
     }
 
     /// Check if a fact exists in the database
@@ -163,7 +185,7 @@ mod tests {
         let mut db = FactDatabase::new();
         let fact = make_atom("parent", vec![atom_const("john"), atom_const("mary")]);
 
-        assert!(db.insert(fact.clone()));
+        assert!(db.insert(fact.clone()).unwrap());
         assert_eq!(db.len(), 1);
         assert!(db.contains(&fact));
     }
@@ -173,7 +195,11 @@ mod tests {
         let mut db = FactDatabase::new();
         let fact = make_atom("parent", vec![var("X"), atom_const("mary")]);
 
-        assert!(!db.insert(fact.clone()));
+        let err = db.insert(fact.clone()).unwrap_err();
+        match &err {
+            InsertError::NonGroundAtom(atom) => assert_eq!(atom, &fact),
+        }
+        assert!(format!("{}", err).contains("non-ground"));
         assert_eq!(db.len(), 0);
     }
 
@@ -182,8 +208,8 @@ mod tests {
         let mut db = FactDatabase::new();
         let fact = make_atom("parent", vec![atom_const("john"), atom_const("mary")]);
 
-        assert!(db.insert(fact.clone()));
-        assert!(!db.insert(fact.clone())); // Duplicate returns false
+        assert!(db.insert(fact.clone()).unwrap());
+        assert!(!db.insert(fact.clone()).unwrap()); // Duplicate returns false
         assert_eq!(db.len(), 1); // Still only one fact
     }
 
@@ -194,12 +220,15 @@ mod tests {
         db.insert(make_atom(
             "parent",
             vec![atom_const("john"), atom_const("mary")],
-        ));
+        ))
+        .unwrap();
         db.insert(make_atom(
             "parent",
             vec![atom_const("mary"), atom_const("alice")],
-        ));
-        db.insert(make_atom("age", vec![atom_const("john"), int(42)]));
+        ))
+        .unwrap();
+        db.insert(make_atom("age", vec![atom_const("john"), int(42)]))
+            .unwrap();
 
         assert_eq!(db.len(), 3);
     }
@@ -209,7 +238,7 @@ mod tests {
     fn test_query_exact_match() {
         let mut db = FactDatabase::new();
         let fact = make_atom("parent", vec![atom_const("john"), atom_const("mary")]);
-        db.insert(fact.clone());
+        db.insert(fact.clone()).unwrap();
 
         let results = db.query(&fact);
         assert_eq!(results.len(), 1);
@@ -222,7 +251,8 @@ mod tests {
         db.insert(make_atom(
             "parent",
             vec![atom_const("john"), atom_const("mary")],
-        ));
+        ))
+        .unwrap();
 
         let pattern = make_atom("parent", vec![atom_const("john"), var("X")]);
         let results = db.query(&pattern);
@@ -238,7 +268,8 @@ mod tests {
         db.insert(make_atom(
             "parent",
             vec![atom_const("john"), atom_const("mary")],
-        ));
+        ))
+        .unwrap();
 
         let pattern = make_atom("parent", vec![var("X"), var("Y")]);
         let results = db.query(&pattern);
@@ -256,15 +287,18 @@ mod tests {
         db.insert(make_atom(
             "parent",
             vec![atom_const("john"), atom_const("mary")],
-        ));
+        ))
+        .unwrap();
         db.insert(make_atom(
             "parent",
             vec![atom_const("john"), atom_const("bob")],
-        ));
+        ))
+        .unwrap();
         db.insert(make_atom(
             "parent",
             vec![atom_const("alice"), atom_const("charlie")],
-        ));
+        ))
+        .unwrap();
 
         let pattern = make_atom("parent", vec![atom_const("john"), var("X")]);
         let results = db.query(&pattern);
@@ -278,7 +312,8 @@ mod tests {
         db.insert(make_atom(
             "parent",
             vec![atom_const("john"), atom_const("mary")],
-        ));
+        ))
+        .unwrap();
 
         let pattern = make_atom("parent", vec![atom_const("alice"), var("X")]);
         let results = db.query(&pattern);
@@ -292,7 +327,8 @@ mod tests {
         db.insert(make_atom(
             "parent",
             vec![atom_const("john"), atom_const("mary")],
-        ));
+        ))
+        .unwrap();
 
         let pattern = make_atom("child", vec![atom_const("john"), var("X")]);
         let results = db.query(&pattern);
@@ -307,12 +343,15 @@ mod tests {
         db.insert(make_atom(
             "parent",
             vec![atom_const("john"), atom_const("mary")],
-        ));
+        ))
+        .unwrap();
         db.insert(make_atom(
             "parent",
             vec![atom_const("bob"), atom_const("alice")],
-        ));
-        db.insert(make_atom("age", vec![atom_const("john"), int(42)]));
+        ))
+        .unwrap();
+        db.insert(make_atom("age", vec![atom_const("john"), int(42)]))
+            .unwrap();
 
         let parent_pred = Intern::new("parent".to_string());
         let facts = db.get_by_predicate(&parent_pred);
@@ -336,8 +375,10 @@ mod tests {
         db.insert(make_atom(
             "parent",
             vec![atom_const("john"), atom_const("mary")],
-        ));
-        db.insert(make_atom("age", vec![atom_const("john"), int(42)]));
+        ))
+        .unwrap();
+        db.insert(make_atom("age", vec![atom_const("john"), int(42)]))
+            .unwrap();
 
         let all = db.all_facts();
         assert_eq!(all.len(), 2);
