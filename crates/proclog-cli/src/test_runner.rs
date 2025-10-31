@@ -3,9 +3,10 @@
 //! This module implements functionality to run ProcLog tests defined with `#test` blocks.
 //! Each test block contains facts, rules, and queries with assertions to verify behavior.
 
+use internment::Intern;
 use proclog::asp::{asp_evaluation, AnswerSet};
 use proclog::ast::{
-    Atom, ChoiceElement, ChoiceRule, Constraint, Literal, Rule, Statement, Term, TestBlock,
+    Atom, ChoiceElement, ChoiceRule, Constraint, Literal, Rule, Statement, Symbol, Term, TestBlock,
     TestCase, Value,
 };
 use proclog::builtins;
@@ -15,7 +16,7 @@ use proclog::evaluation::{stratified_evaluation_with_constraints, EvaluationErro
 use proclog::grounding::{ground_rule, satisfy_body};
 use proclog::query::evaluate_query;
 use proclog::unification::{unify_atoms, Substitution};
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Result of running a single test case
 #[derive(Debug, Clone)]
@@ -435,12 +436,17 @@ fn evaluate_query_with_rules(
     }
 
     let mut augmented_db = db.clone();
-    apply_ground_rules(&relevant_rules, &mut augmented_db);
+    let mut visited = HashSet::new();
 
     for literal in &query.body {
         if let Literal::Positive(atom) = literal {
             if builtins::parse_builtin(atom).is_none() {
-                derive_specialized_rule_facts(atom, &relevant_rules, &mut augmented_db);
+                derive_specialized_rule_facts(
+                    atom,
+                    &relevant_rules,
+                    &mut augmented_db,
+                    &mut visited,
+                );
             }
         }
     }
@@ -448,25 +454,17 @@ fn evaluate_query_with_rules(
     evaluate_query(query, &augmented_db)
 }
 
-fn apply_ground_rules(rules: &[Rule], db: &mut FactDatabase) {
-    let mut changed = true;
-
-    while changed {
-        changed = false;
-
-        for rule in rules {
-            for fact in ground_rule(rule, db) {
-                if let Ok(inserted) = db.insert(fact) {
-                    if inserted {
-                        changed = true;
-                    }
-                }
-            }
-        }
+fn derive_specialized_rule_facts(
+    atom: &Atom,
+    rules: &[Rule],
+    db: &mut FactDatabase,
+    visited: &mut HashSet<Atom>,
+) {
+    let canonical = canonicalize_atom(atom);
+    if !visited.insert(canonical) {
+        return;
     }
-}
 
-fn derive_specialized_rule_facts(atom: &Atom, rules: &[Rule], db: &mut FactDatabase) {
     for rule in rules.iter().filter(|r| r.head.predicate == atom.predicate) {
         let mut head_subst = Substitution::new();
 
@@ -484,6 +482,14 @@ fn derive_specialized_rule_facts(atom: &Atom, rules: &[Rule], db: &mut FactDatab
             })
             .collect();
 
+        for body_literal in &specialized_body {
+            if let Literal::Positive(body_atom) = body_literal {
+                if builtins::parse_builtin(body_atom).is_none() {
+                    derive_specialized_rule_facts(body_atom, rules, db, visited);
+                }
+            }
+        }
+
         let specialized_rule = Rule {
             head: specialized_head.clone(),
             body: specialized_body.clone(),
@@ -494,6 +500,45 @@ fn derive_specialized_rule_facts(atom: &Atom, rules: &[Rule], db: &mut FactDatab
         }
 
         handle_equality_builtins(&specialized_head, &specialized_body, db);
+    }
+}
+
+fn canonicalize_atom(atom: &Atom) -> Atom {
+    let mut mapping = HashMap::new();
+    Atom {
+        predicate: atom.predicate.clone(),
+        terms: atom
+            .terms
+            .iter()
+            .map(|term| canonicalize_term(term, &mut mapping))
+            .collect(),
+    }
+}
+
+fn canonicalize_term(term: &Term, mapping: &mut HashMap<Symbol, Symbol>) -> Term {
+    match term {
+        Term::Variable(var) => {
+            let symbol = if let Some(existing) = mapping.get(var) {
+                existing.clone()
+            } else {
+                let name = format!("_G{}", mapping.len());
+                let interned = Intern::new(name);
+                mapping.insert(var.clone(), interned.clone());
+                interned
+            };
+            Term::Variable(symbol)
+        }
+        Term::Compound(functor, args) => Term::Compound(
+            functor.clone(),
+            args.iter()
+                .map(|arg| canonicalize_term(arg, mapping))
+                .collect(),
+        ),
+        Term::Range(start, end) => Term::Range(
+            Box::new(canonicalize_term(start, mapping)),
+            Box::new(canonicalize_term(end, mapping)),
+        ),
+        Term::Constant(_) => term.clone(),
     }
 }
 
