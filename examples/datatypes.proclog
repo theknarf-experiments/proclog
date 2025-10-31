@@ -90,11 +90,6 @@ valid_attack(Attacker, Target, Damage, Critical) :-
     critical_hit(Critical),                       % boolean
     not is_friendly(Attacker, Target).            % negation
 
-/* ===== PROBABILISTIC FACTS WITH DATATYPES ===== */
-0.7 :: loot(gold, 100).                           % 70% chance of 100 gold
-0.3 :: loot(sword, 1).                            % 30% chance of sword
-0.1 :: special_event("Dragon Attack!").           % 10% chance of event
-
 /* ===== CONSTRAINTS ===== */
 % Type safety constraints
 :- health(Player, H), H < 0.                      % Health can't be negative
