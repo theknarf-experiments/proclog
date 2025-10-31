@@ -10,4 +10,3 @@ internment = { workspace = true }
 clap = { workspace = true }
 notify = { workspace = true }
 crossterm = { workspace = true }
-ratatui = { workspace = true }
