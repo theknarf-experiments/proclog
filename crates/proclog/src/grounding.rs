@@ -25,6 +25,49 @@ use crate::constants::ConstantEnv;
 use crate::database::FactDatabase;
 use crate::unification::Substitution;
 
+#[cfg(test)]
+mod allocation_tracker {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    pub struct CountingAllocator;
+
+    static ALLOCATIONS: AtomicUsize = AtomicUsize::new(0);
+
+    pub fn reset() {
+        ALLOCATIONS.store(0, Ordering::SeqCst);
+    }
+
+    pub fn allocations() -> usize {
+        ALLOCATIONS.load(Ordering::SeqCst)
+    }
+
+    unsafe impl GlobalAlloc for CountingAllocator {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
+            System.alloc(layout)
+        }
+
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            System.dealloc(ptr, layout)
+        }
+
+        unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+            ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
+            System.alloc_zeroed(layout)
+        }
+
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+            ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
+            System.realloc(ptr, layout, new_size)
+        }
+    }
+}
+
+#[cfg(test)]
+#[global_allocator]
+static GLOBAL: allocation_tracker::CountingAllocator = allocation_tracker::CountingAllocator;
+
 /// Ground a rule: generate all ground instances by substituting variables
 /// For a rule like `ancestor(X, Z) :- parent(X, Y), parent(Y, Z)`
 /// This finds all ways to satisfy the body and applies those substitutions to the head
@@ -45,108 +88,63 @@ pub fn ground_rule(rule: &Rule, db: &FactDatabase) -> Vec<Atom> {
 
 /// Find all substitutions that satisfy a conjunction of literals
 pub fn satisfy_body(body: &[Literal], db: &FactDatabase) -> Vec<Substitution> {
-    if body.is_empty() {
-        // Empty body is trivially satisfied with empty substitution
-        return vec![Substitution::new()];
+    satisfy_body_recursive(body, db, 0, &Substitution::new())
+}
+
+fn satisfy_body_recursive(
+    body: &[Literal],
+    db: &FactDatabase,
+    index: usize,
+    current_subst: &Substitution,
+) -> Vec<Substitution> {
+    if index == body.len() {
+        return vec![current_subst.clone()];
     }
 
-    // Process first literal
-    let first_literal = &body[0];
-    let rest = &body[1..];
-
-    match first_literal {
+    match &body[index] {
         Literal::Positive(atom) => {
-            // Check if this is a built-in predicate
             if let Some(builtin) = builtins::parse_builtin(atom) {
-                // This is a built-in - process the rest first, then filter
-                if rest.is_empty() {
-                    // No more literals - evaluate built-in with empty substitution
-                    let empty_subst = Substitution::new();
-                    match builtins::eval_builtin(&builtin, &empty_subst) {
-                        Some(true) => vec![empty_subst],
-                        _ => vec![],
-                    }
-                } else {
-                    // Process rest first, then check built-in for each substitution
-                    let rest_substs = satisfy_body(rest, db);
-                    let mut result = Vec::new();
-
-                    for subst in rest_substs {
-                        // Apply substitution to the built-in and evaluate
-                        let applied_builtin = apply_subst_to_builtin(&subst, &builtin);
-                        match builtins::eval_builtin(&applied_builtin, &subst) {
-                            Some(true) => result.push(subst),
-                            _ => {} // Built-in failed, skip this substitution
-                        }
-                    }
-
-                    result
-                }
-            } else {
-                // Regular atom - query the database for matches
-                let initial_substs = db.query(atom);
-
-                if rest.is_empty() {
-                    // No more literals to process
-                    initial_substs
-                } else {
-                    // For each substitution from the first literal,
-                    // apply it to the rest and continue
-                    let mut all_substs = Vec::new();
-
-                    for subst in initial_substs {
-                        // Apply current substitution to remaining literals
-                        let applied_rest: Vec<Literal> = rest
-                            .iter()
-                            .map(|lit| apply_subst_to_literal(&subst, lit))
-                            .collect();
-
-                        // Recursively satisfy the rest
-                        let rest_substs = satisfy_body(&applied_rest, db);
-
-                        // Combine substitutions
-                        for rest_subst in rest_substs {
-                            if let Some(combined) = combine_substs(&subst, &rest_subst) {
-                                all_substs.push(combined);
-                            }
-                        }
-                    }
-
-                    all_substs
-                }
-            }
-        }
-        Literal::Negative(atom) => {
-            // Negation as failure: the atom must NOT unify with any fact in the database
-            // For each substitution from the rest of the body,
-            // check that the atom (with substitution applied) doesn't match any fact
-
-            if rest.is_empty() {
-                if database_has_match(db, atom) {
-                    // Atom is in the database - negation fails
-                    vec![]
-                } else {
-                    // Atom is not in the database - negation succeeds with empty substitution
-                    vec![Substitution::new()]
-                }
-            } else {
-                // Process the rest first, then filter by negation
-                let rest_substs = satisfy_body(rest, db);
+                // Built-ins act as filters - evaluate them after satisfying the rest.
+                let rest_substs = satisfy_body_recursive(body, db, index + 1, current_subst);
                 let mut result = Vec::new();
 
                 for subst in rest_substs {
-                    // Apply substitution to the negated atom
-                    let applied_atom = subst.apply_atom(atom);
-
-                    if !database_has_match(db, &applied_atom) {
-                        // Atom doesn't exist - negation succeeds
+                    let applied_builtin = apply_subst_to_builtin(&subst, &builtin);
+                    if let Some(true) = builtins::eval_builtin(&applied_builtin, &subst) {
                         result.push(subst);
                     }
-                    // If atom exists, negation fails - don't include this substitution
+                }
+
+                result
+            } else {
+                // Apply the current substitution to the atom before querying.
+                let grounded_atom = current_subst.apply_atom(atom);
+                let mut result = Vec::new();
+
+                for atom_subst in db.query(&grounded_atom) {
+                    if let Some(combined) = combine_substs(current_subst, &atom_subst) {
+                        let mut rest_results =
+                            satisfy_body_recursive(body, db, index + 1, &combined);
+                        result.append(&mut rest_results);
+                    }
                 }
 
                 result
             }
+        }
+        Literal::Negative(atom) => {
+            // Negation filters substitutions produced by the rest of the body.
+            let rest_substs = satisfy_body_recursive(body, db, index + 1, current_subst);
+            let mut result = Vec::new();
+
+            for subst in rest_substs {
+                let grounded_atom = subst.apply_atom(atom);
+                if !database_has_match(db, &grounded_atom) {
+                    result.push(subst);
+                }
+            }
+
+            result
         }
     }
 }
@@ -575,6 +573,88 @@ mod tests {
     use super::*;
     use internment::Intern;
 
+    fn satisfy_body_naive(body: &[Literal], db: &FactDatabase) -> Vec<Substitution> {
+        if body.is_empty() {
+            return vec![Substitution::new()];
+        }
+
+        let first_literal = &body[0];
+        let rest = &body[1..];
+
+        match first_literal {
+            Literal::Positive(atom) => {
+                if let Some(builtin) = builtins::parse_builtin(atom) {
+                    if rest.is_empty() {
+                        let empty_subst = Substitution::new();
+                        match builtins::eval_builtin(&builtin, &empty_subst) {
+                            Some(true) => vec![empty_subst],
+                            _ => vec![],
+                        }
+                    } else {
+                        let rest_substs = satisfy_body_naive(rest, db);
+                        let mut result = Vec::new();
+
+                        for subst in rest_substs {
+                            let applied_builtin = apply_subst_to_builtin(&subst, &builtin);
+                            if let Some(true) = builtins::eval_builtin(&applied_builtin, &subst) {
+                                result.push(subst);
+                            }
+                        }
+
+                        result
+                    }
+                } else {
+                    let initial_substs = db.query(atom);
+
+                    if rest.is_empty() {
+                        initial_substs
+                    } else {
+                        let mut all_substs = Vec::new();
+
+                        for subst in initial_substs {
+                            let applied_rest: Vec<Literal> = rest
+                                .iter()
+                                .map(|lit| apply_subst_to_literal(&subst, lit))
+                                .collect();
+
+                            let rest_substs = satisfy_body_naive(&applied_rest, db);
+
+                            for rest_subst in rest_substs {
+                                if let Some(combined) = combine_substs(&subst, &rest_subst) {
+                                    all_substs.push(combined);
+                                }
+                            }
+                        }
+
+                        all_substs
+                    }
+                }
+            }
+            Literal::Negative(atom) => {
+                if rest.is_empty() {
+                    if database_has_match(db, atom) {
+                        vec![]
+                    } else {
+                        vec![Substitution::new()]
+                    }
+                } else {
+                    let rest_substs = satisfy_body_naive(rest, db);
+                    let mut result = Vec::new();
+
+                    for subst in rest_substs {
+                        let applied_atom = subst.apply_atom(atom);
+
+                        if !database_has_match(db, &applied_atom) {
+                            result.push(subst);
+                        }
+                    }
+
+                    result
+                }
+            }
+        }
+    }
+
     // Helper functions
     fn atom_const(name: &str) -> Term {
         Term::Constant(Value::Atom(Intern::new(name.to_string())))
@@ -954,6 +1034,39 @@ mod tests {
 
         // All negations succeed
         assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_large_rule_allocation_regression() {
+        let mut db = FactDatabase::new();
+        let chain_len = 30;
+
+        for i in 0..=chain_len {
+            db.insert(make_atom("link", vec![int(i as i64), int((i + 1) as i64)])).unwrap();
+        }
+
+        let mut body = Vec::new();
+        body.push(Literal::Positive(make_atom("link", vec![int(0), var("X1")])));
+
+        for i in 1..=chain_len {
+            let current = format!("X{i}");
+            let next = format!("X{}", i + 1);
+            body.push(Literal::Positive(make_atom(
+                "link",
+                vec![var(&current), var(&next)],
+            )));
+        }
+
+        allocation_tracker::reset();
+        let naive_results = satisfy_body_naive(&body, &db);
+        let naive_allocs = allocation_tracker::allocations();
+
+        allocation_tracker::reset();
+        let optimized_results = satisfy_body(&body, &db);
+        let optimized_allocs = allocation_tracker::allocations();
+
+        assert_eq!(naive_results, optimized_results);
+        assert!(optimized_allocs < naive_allocs);
     }
 
     #[test]
