@@ -85,7 +85,10 @@ impl From<InsertError> for EvaluationError {
 /// Naive evaluation: repeatedly apply all rules until fixed point
 /// This is simple but inefficient - it re-evaluates all facts every iteration
 #[allow(dead_code)]
-pub fn naive_evaluation(rules: &[Rule], initial_facts: FactDatabase) -> FactDatabase {
+pub fn naive_evaluation(
+    rules: &[Rule],
+    initial_facts: FactDatabase,
+) -> Result<FactDatabase, InsertError> {
     let mut db = initial_facts;
     let mut changed = true;
 
@@ -97,10 +100,7 @@ pub fn naive_evaluation(rules: &[Rule], initial_facts: FactDatabase) -> FactData
         for rule in rules {
             let derived = ground_rule(rule, &db);
             for fact in derived {
-                if db
-                    .insert(fact)
-                    .expect("derived non-ground fact during naive evaluation")
-                {
+                if db.insert(fact)? {
                     changed = true;
                 }
             }
@@ -112,7 +112,7 @@ pub fn naive_evaluation(rules: &[Rule], initial_facts: FactDatabase) -> FactData
         }
     }
 
-    db
+    Ok(db)
 }
 
 /// Semi-naive evaluation: only process new facts (delta) each iteration
@@ -421,7 +421,8 @@ mod tests {
         .unwrap();
 
         let rules = vec![];
-        let result = naive_evaluation(&rules, db.clone());
+        let result =
+            naive_evaluation(&rules, db.clone()).expect("naive evaluation should succeed");
 
         // No rules means no new facts
         assert_eq!(result.len(), db.len());
@@ -450,7 +451,7 @@ mod tests {
             ],
         )];
 
-        let result = naive_evaluation(&rules, db);
+        let result = naive_evaluation(&rules, db).expect("naive evaluation should succeed");
 
         // Should have 2 parent facts + 1 grandparent fact
         assert_eq!(result.len(), 3);
@@ -490,7 +491,7 @@ mod tests {
             ),
         ];
 
-        let result = naive_evaluation(&rules, db);
+        let result = naive_evaluation(&rules, db).expect("naive evaluation should succeed");
 
         let path_pred = Intern::new("path".to_string());
         let paths = result.get_by_predicate(&path_pred);
@@ -501,6 +502,18 @@ mod tests {
         // path(a, d)                           [from second rule, iteration 3]
         // Total: 6 path facts
         assert_eq!(paths.len(), 6);
+    }
+
+    #[test]
+    fn test_naive_evaluation_reports_non_ground_error() {
+        let db = FactDatabase::new();
+        let rules = vec![make_rule(make_atom("bad", vec![var("X")]), vec![])];
+
+        let err = naive_evaluation(&rules, db).expect_err("expected derivation error");
+
+        assert!(
+            matches!(err, InsertError::NonGroundAtom(atom) if atom.predicate.as_ref() == "bad")
+        );
     }
 
     // Semi-naive evaluation tests
@@ -629,7 +642,8 @@ mod tests {
             ),
         ];
 
-        let naive_result = naive_evaluation(&rules, db.clone());
+        let naive_result =
+            naive_evaluation(&rules, db.clone()).expect("naive evaluation should succeed");
         let semi_naive_result =
             semi_naive_evaluation(&rules, db).expect("semi-naive evaluation should succeed");
 
