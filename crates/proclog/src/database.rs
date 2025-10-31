@@ -24,6 +24,9 @@ use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt;
 
+#[cfg(test)]
+use std::cell::Cell;
+
 /// A database of ground facts with efficient indexing
 #[derive(Debug, Clone)]
 pub struct FactDatabase {
@@ -49,6 +52,12 @@ impl fmt::Display for InsertError {
 }
 
 impl Error for InsertError {}
+
+#[cfg(test)]
+thread_local! {
+    static TRACK_GROUND_QUERIES: Cell<bool> = Cell::new(false);
+    static GROUND_QUERY_COUNT: Cell<usize> = Cell::new(0);
+}
 
 impl FactDatabase {
     pub fn new() -> Self {
@@ -83,6 +92,13 @@ impl FactDatabase {
     /// Query for facts matching a pattern (may contain variables)
     /// Returns all substitutions that make the pattern match facts in the database
     pub fn query(&self, pattern: &Atom) -> Vec<Substitution> {
+        #[cfg(test)]
+        TRACK_GROUND_QUERIES.with(|flag| {
+            if flag.get() && is_ground(pattern) {
+                GROUND_QUERY_COUNT.with(|count| count.set(count.get() + 1));
+            }
+        });
+
         let mut results = Vec::new();
 
         // Get all facts with the same predicate
@@ -128,6 +144,36 @@ impl FactDatabase {
     /// Check if database is empty
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    #[cfg(test)]
+    pub(crate) fn track_ground_queries() -> GroundQueryTracker {
+        GroundQueryTracker::new()
+    }
+}
+
+#[cfg(test)]
+pub(crate) struct GroundQueryTracker {
+    _private: (),
+}
+
+#[cfg(test)]
+impl GroundQueryTracker {
+    fn new() -> Self {
+        TRACK_GROUND_QUERIES.with(|flag| flag.set(true));
+        GROUND_QUERY_COUNT.with(|count| count.set(0));
+        GroundQueryTracker { _private: () }
+    }
+
+    pub(crate) fn count(&self) -> usize {
+        GROUND_QUERY_COUNT.with(|count| count.get())
+    }
+}
+
+#[cfg(test)]
+impl Drop for GroundQueryTracker {
+    fn drop(&mut self) {
+        TRACK_GROUND_QUERIES.with(|flag| flag.set(false));
     }
 }
 
