@@ -326,6 +326,10 @@ fn spacing() -> impl Parser<char, (), Error = ParseError> + Clone {
         .ignored()
 }
 
+fn non_test_statement() -> impl Parser<char, Statement, Error = ParseError> + Clone {
+    choice((const_decl(), choice_rule(), constraint(), rule(), fact()))
+}
+
 /// Parse a fact
 fn fact() -> impl Parser<char, Statement, Error = ParseError> + Clone {
     atom()
@@ -437,20 +441,12 @@ fn test_case() -> impl Parser<char, TestCase, Error = ParseError> + Clone {
 
 /// Parse a test block: #test "name" { statements and test cases }
 fn test_block() -> impl Parser<char, Statement, Error = ParseError> + Clone {
-    let spacing = || {
-        comment()
-            .or(text::whitespace().at_least(1).ignored())
-            .repeated()
-            .ignored()
-    };
-
     // Test block content item can be either a statement or a test case
     let test_item = choice((
         // Try test case first (starts with ?-)
         test_case().map(|tc| (None, Some(tc))),
         // Then try regular statements (but not other test blocks)
-        choice((const_decl(), choice_rule(), constraint(), rule(), fact()))
-            .map(|stmt| (Some(stmt), None)),
+        non_test_statement().map(|stmt| (Some(stmt), None)),
     ))
     .padded_by(spacing());
 
@@ -557,12 +553,8 @@ fn choice_rule() -> impl Parser<char, Statement, Error = ParseError> + Clone {
 /// Parse a statement
 fn statement() -> impl Parser<char, Statement, Error = ParseError> + Clone {
     choice((
-        test_block(),  // Try #test first (distinctive prefix)
-        const_decl(),  // Try #const (distinctive prefix)
-        choice_rule(), // Try choice rules (distinctive { prefix)
-        constraint(),
-        rule(),
-        fact(),
+        test_block(),        // Try #test first (distinctive prefix)
+        non_test_statement(),
     ))
     .labelled("statement")
 }
@@ -570,11 +562,7 @@ fn statement() -> impl Parser<char, Statement, Error = ParseError> + Clone {
 /// Parse a program
 pub fn program() -> impl Parser<char, Program, Error = ParseError> + Clone {
     statement()
-        .padded_by(
-            comment()
-                .or(text::whitespace().at_least(1).ignored())
-                .repeated(),
-        )
+        .padded_by(spacing())
         .repeated()
         .map(|statements| Program { statements })
         .then_ignore(end())
