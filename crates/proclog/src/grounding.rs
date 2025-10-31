@@ -88,24 +88,55 @@ pub fn ground_rule(rule: &Rule, db: &FactDatabase) -> Vec<Atom> {
 
 /// Find all substitutions that satisfy a conjunction of literals
 pub fn satisfy_body(body: &[Literal], db: &FactDatabase) -> Vec<Substitution> {
-    satisfy_body_recursive(body, db, 0, &Substitution::new())
+    satisfy_body_with_selector(body, db, None, &|_, _| DatabaseSelection::Full)
 }
 
-fn satisfy_body_recursive(
+enum DatabaseSelection {
+    Full,
+    Delta,
+}
+
+fn satisfy_body_with_selector<F>(
     body: &[Literal],
-    db: &FactDatabase,
+    full_db: &FactDatabase,
+    delta: Option<&FactDatabase>,
+    selector: &F,
+) -> Vec<Substitution>
+where
+    F: Fn(usize, &Literal) -> DatabaseSelection,
+{
+    satisfy_body_with_selector_recursive(body, full_db, delta, selector, 0, &Substitution::new())
+}
+
+fn satisfy_body_with_selector_recursive<F>(
+    body: &[Literal],
+    full_db: &FactDatabase,
+    delta: Option<&FactDatabase>,
+    selector: &F,
     index: usize,
     current_subst: &Substitution,
-) -> Vec<Substitution> {
+) -> Vec<Substitution>
+where
+    F: Fn(usize, &Literal) -> DatabaseSelection,
+{
     if index == body.len() {
         return vec![current_subst.clone()];
     }
 
-    match &body[index] {
+    let literal = &body[index];
+
+    match literal {
         Literal::Positive(atom) => {
             if let Some(builtin) = builtins::parse_builtin(atom) {
                 // Built-ins act as filters - evaluate them after satisfying the rest.
-                let rest_substs = satisfy_body_recursive(body, db, index + 1, current_subst);
+                let rest_substs = satisfy_body_with_selector_recursive(
+                    body,
+                    full_db,
+                    delta,
+                    selector,
+                    index + 1,
+                    current_subst,
+                );
                 let mut result = Vec::new();
 
                 for subst in rest_substs {
@@ -119,12 +150,22 @@ fn satisfy_body_recursive(
             } else {
                 // Apply the current substitution to the atom before querying.
                 let grounded_atom = current_subst.apply_atom(atom);
+                let db = match selector(index, literal) {
+                    DatabaseSelection::Full => full_db,
+                    DatabaseSelection::Delta => delta.unwrap_or(full_db),
+                };
                 let mut result = Vec::new();
 
                 for atom_subst in db.query(&grounded_atom) {
                     if let Some(combined) = combine_substs(current_subst, &atom_subst) {
-                        let mut rest_results =
-                            satisfy_body_recursive(body, db, index + 1, &combined);
+                        let mut rest_results = satisfy_body_with_selector_recursive(
+                            body,
+                            full_db,
+                            delta,
+                            selector,
+                            index + 1,
+                            &combined,
+                        );
                         result.append(&mut rest_results);
                     }
                 }
@@ -134,12 +175,19 @@ fn satisfy_body_recursive(
         }
         Literal::Negative(atom) => {
             // Negation filters substitutions produced by the rest of the body.
-            let rest_substs = satisfy_body_recursive(body, db, index + 1, current_subst);
+            let rest_substs = satisfy_body_with_selector_recursive(
+                body,
+                full_db,
+                delta,
+                selector,
+                index + 1,
+                current_subst,
+            );
             let mut result = Vec::new();
 
             for subst in rest_substs {
                 let grounded_atom = subst.apply_atom(atom);
-                if !database_has_match(db, &grounded_atom) {
+                if !database_has_match(full_db, &grounded_atom) {
                     result.push(subst);
                 }
             }
@@ -247,124 +295,19 @@ fn satisfy_body_mixed(
     full_db: &FactDatabase,
     delta_pos: usize,
 ) -> Vec<Substitution> {
-    satisfy_body_mixed_recursive(body, delta, full_db, delta_pos, 0)
-}
-
-/// Recursive helper for satisfy_body_mixed
-fn satisfy_body_mixed_recursive(
-    body: &[Literal],
-    delta: &FactDatabase,
-    full_db: &FactDatabase,
-    delta_pos: usize,
-    current_pos: usize,
-) -> Vec<Substitution> {
-    if body.is_empty() {
-        return vec![Substitution::new()];
-    }
-
-    let first_literal = &body[0];
-    let rest = &body[1..];
-
-    match first_literal {
-        Literal::Positive(atom) => {
-            // Check if this is a built-in predicate
-            if let Some(builtin) = crate::builtins::parse_builtin(atom) {
-                // This is a built-in - process the rest first, then filter
-                if rest.is_empty() {
-                    // No more literals - evaluate built-in with empty substitution
-                    let empty_subst = Substitution::new();
-                    match crate::builtins::eval_builtin(&builtin, &empty_subst) {
-                        Some(true) => vec![empty_subst],
-                        _ => vec![],
-                    }
-                } else {
-                    // Process rest first, then check built-in for each substitution
-                    let rest_substs = satisfy_body_mixed_recursive(
-                        rest,
-                        delta,
-                        full_db,
-                        delta_pos,
-                        current_pos + 1,
-                    );
-                    let mut result = Vec::new();
-
-                    for subst in rest_substs {
-                        // Apply substitution to the built-in and evaluate
-                        let applied_builtin = apply_subst_to_builtin(&subst, &builtin);
-                        match crate::builtins::eval_builtin(&applied_builtin, &subst) {
-                            Some(true) => result.push(subst),
-                            _ => {} // Built-in failed, skip this substitution
-                        }
-                    }
-
-                    result
+    satisfy_body_with_selector(body, full_db, Some(delta), &|index, literal| {
+        if index == delta_pos {
+            match literal {
+                Literal::Positive(atom) if builtins::parse_builtin(atom).is_some() => {
+                    DatabaseSelection::Full
                 }
-            } else {
-                // Regular atom - use delta if current position is delta_pos, otherwise use full_db
-                let db = if current_pos == delta_pos {
-                    delta
-                } else {
-                    full_db
-                };
-                let initial_substs = db.query(atom);
-
-                if rest.is_empty() {
-                    initial_substs
-                } else {
-                    let mut all_substs = Vec::new();
-
-                    for subst in initial_substs {
-                        let applied_rest: Vec<Literal> = rest
-                            .iter()
-                            .map(|lit| apply_subst_to_literal(&subst, lit))
-                            .collect();
-
-                        let rest_substs = satisfy_body_mixed_recursive(
-                            &applied_rest,
-                            delta,
-                            full_db,
-                            delta_pos,
-                            current_pos + 1,
-                        );
-
-                        for rest_subst in rest_substs {
-                            if let Some(combined) = combine_substs(&subst, &rest_subst) {
-                                all_substs.push(combined);
-                            }
-                        }
-                    }
-
-                    all_substs
-                }
+                Literal::Positive(_) => DatabaseSelection::Delta,
+                Literal::Negative(_) => DatabaseSelection::Full,
             }
+        } else {
+            DatabaseSelection::Full
         }
-        Literal::Negative(atom) => {
-            // Negation uses full_db (not delta) - we need the complete view
-            if rest.is_empty() {
-                let matches = full_db.query(atom);
-                if matches.is_empty() {
-                    vec![Substitution::new()]
-                } else {
-                    vec![]
-                }
-            } else {
-                let rest_substs =
-                    satisfy_body_mixed_recursive(rest, delta, full_db, delta_pos, current_pos + 1);
-                let mut result = Vec::new();
-
-                for subst in rest_substs {
-                    let ground_atom = subst.apply_atom(atom);
-                    let matches = full_db.query(&ground_atom);
-
-                    if matches.is_empty() {
-                        result.push(subst);
-                    }
-                }
-
-                result
-            }
-        }
-    }
+    })
 }
 
 /// Expand a range term into concrete integer values
@@ -677,6 +620,22 @@ mod tests {
 
     fn make_rule(head: Atom, body: Vec<Literal>) -> Rule {
         Rule { head, body }
+    }
+
+    fn normalize_substitutions(substs: Vec<Substitution>) -> Vec<Vec<(String, String)>> {
+        let mut normalized: Vec<_> = substs
+            .into_iter()
+            .map(|subst| {
+                let mut bindings: Vec<_> = subst
+                    .iter()
+                    .map(|(symbol, term)| (symbol.as_ref().clone(), format!("{:?}", term)))
+                    .collect();
+                bindings.sort();
+                bindings
+            })
+            .collect();
+        normalized.sort();
+        normalized
     }
 
     #[test]
@@ -1539,6 +1498,51 @@ mod tests {
     }
 
     #[test]
+    fn test_builtin_filters_identical_in_pure_and_mixed() {
+        let mut full_db = FactDatabase::new();
+        full_db
+            .insert(make_atom(
+                "number",
+                vec![Term::Constant(Value::Integer(7))],
+            ))
+            .unwrap();
+        full_db
+            .insert(make_atom(
+                "number",
+                vec![Term::Constant(Value::Integer(3))],
+            ))
+            .unwrap();
+
+        let mut delta = FactDatabase::new();
+        delta
+            .insert(make_atom(
+                "number",
+                vec![Term::Constant(Value::Integer(7))],
+            ))
+            .unwrap();
+
+        let body = vec![
+            Literal::Positive(make_atom("number", vec![var("X")])),
+            Literal::Positive(Atom {
+                predicate: Intern::new(">".to_string()),
+                terms: vec![var("X"), Term::Constant(Value::Integer(5))],
+            }),
+        ];
+
+        let pure = normalize_substitutions(satisfy_body(&body, &full_db));
+
+        for delta_pos in 0..body.len() {
+            let mixed = normalize_substitutions(satisfy_body_mixed(
+                &body,
+                &delta,
+                &full_db,
+                delta_pos,
+            ));
+            assert_eq!(mixed, pure, "mixed results differed at delta_pos {}", delta_pos);
+        }
+    }
+
+    #[test]
     fn test_ground_rule_with_builtin_comparison() {
         // Test: large(X) :- number(X), X > 5
         let mut db = FactDatabase::new();
@@ -1572,6 +1576,42 @@ mod tests {
         match &result[0].terms[0] {
             Term::Constant(Value::Integer(7)) => {}
             other => panic!("Expected large(7), got large({:?})", other),
+        }
+    }
+
+    #[test]
+    fn test_negation_identical_in_pure_and_mixed() {
+        let mut full_db = FactDatabase::new();
+        full_db
+            .insert(make_atom("person", vec![atom_const("alice")]))
+            .unwrap();
+        full_db
+            .insert(make_atom("person", vec![atom_const("bob")]))
+            .unwrap();
+        full_db
+            .insert(make_atom("enemy", vec![atom_const("bob")]))
+            .unwrap();
+
+        let mut delta = FactDatabase::new();
+        delta
+            .insert(make_atom("person", vec![atom_const("alice")]))
+            .unwrap();
+
+        let body = vec![
+            Literal::Positive(make_atom("person", vec![var("X")])),
+            Literal::Negative(make_atom("enemy", vec![var("X")])),
+        ];
+
+        let pure = normalize_substitutions(satisfy_body(&body, &full_db));
+
+        for delta_pos in 0..body.len() {
+            let mixed = normalize_substitutions(satisfy_body_mixed(
+                &body,
+                &delta,
+                &full_db,
+                delta_pos,
+            ));
+            assert_eq!(mixed, pure, "mixed results differed at delta_pos {}", delta_pos);
         }
     }
 
