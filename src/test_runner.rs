@@ -10,7 +10,7 @@ use crate::ast::{
 use crate::builtins;
 use crate::constants::ConstantEnv;
 use crate::database::FactDatabase;
-use crate::evaluation::semi_naive_evaluation;
+use crate::evaluation::{stratified_evaluation_with_constraints, EvaluationError};
 use crate::query::evaluate_query;
 use crate::unification::{unify_atoms, Substitution};
 use internment::Intern;
@@ -182,7 +182,7 @@ pub fn run_test_block(base_statements: &[Statement], test_block: &TestBlock) -> 
     }
 
     // Evaluate program to get answer sets (ASP) or single database (Datalog)
-    let answer_sets = if has_asp_statements {
+    let evaluation_result: Result<Vec<AnswerSet>, EvaluationError> = if has_asp_statements {
         // Use ASP evaluation - construct program from collected components
         let mut statements = Vec::new();
 
@@ -207,18 +207,40 @@ pub fn run_test_block(base_statements: &[Statement], test_block: &TestBlock) -> 
         }
 
         let program = crate::ast::Program { statements };
-        asp_evaluation(&program)
+        Ok(asp_evaluation(&program))
     } else {
-        // Use regular Datalog evaluation
-        let db = if rules.is_empty() {
-            initial_facts
-        } else {
-            semi_naive_evaluation(&rules, initial_facts)
-        };
-        // Convert single database to single answer set
-        vec![AnswerSet {
-            atoms: db.all_facts().into_iter().cloned().collect(),
-        }]
+        // Use regular Datalog evaluation with constraint checking
+        stratified_evaluation_with_constraints(&rules, &constraints, initial_facts).map(|db| {
+            vec![AnswerSet {
+                atoms: db.all_facts().into_iter().cloned().collect(),
+            }]
+        })
+    };
+
+    let answer_sets = match evaluation_result {
+        Ok(answer_sets) => answer_sets,
+        Err(err) => {
+            let mut case_results = Vec::new();
+            for test_case in &test_block.test_cases {
+                let query_text = format_query(&test_case.query);
+                let message = format!(
+                    "✗ Evaluation failed before running {}: {}",
+                    query_text, err
+                );
+                case_results.push(TestCaseResult {
+                    passed: false,
+                    message,
+                });
+            }
+
+            return TestResult {
+                test_name: test_block.name.clone(),
+                passed: false,
+                total_cases: test_block.test_cases.len(),
+                passed_cases: 0,
+                case_results,
+            };
+        }
     };
 
     // Run each test case
@@ -813,6 +835,37 @@ mod tests {
         let result = run_test_block(&[], test_block);
         assert!(!result.passed, "Test should fail");
         assert_eq!(result.passed_cases, 0);
+    }
+
+    #[test]
+    fn test_constraint_violation_fails_test_case() {
+        let input = r#"
+            #test "constraint failure" {
+                parent(alice, bob).
+                :- parent(alice, bob).
+
+                ?- parent(alice, bob).
+                + true.
+            }
+        "#;
+
+        let program = parse_program(input).expect("Parse failed");
+        let test_block = match &program.statements[0] {
+            Statement::Test(tb) => tb,
+            _ => panic!("Expected test block"),
+        };
+
+        let result = run_test_block(&[], test_block);
+        assert!(!result.passed, "Test should fail due to constraint violation");
+        assert_eq!(result.passed_cases, 0);
+        assert_eq!(result.case_results.len(), 1);
+        assert!(
+            result.case_results[0]
+                .message
+                .contains("Constraint"),
+            "Expected constraint failure message, got: {}",
+            result.case_results[0].message
+        );
     }
 
     #[test]
