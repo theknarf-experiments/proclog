@@ -1,4 +1,4 @@
-use chumsky::error::Simple;
+use chumsky::error::{Simple, SimpleReason};
 use proclog::asp::{asp_evaluation, AnswerSet};
 use proclog::ast::{Constraint, Literal, Query, Rule, Statement, Symbol, Term, Value};
 use proclog::constants::ConstantEnv;
@@ -142,14 +142,14 @@ impl ReplEngine {
                     EngineResponse::info(lines)
                 }
             }
-            Err(errors) => EngineResponse::error(format_parse_errors(errors)),
+            Err(errors) => EngineResponse::error(format_parse_errors(input, errors)),
         }
     }
 
     fn handle_query(&mut self, input: &str) -> EngineResponse {
         match parse_query(input) {
             Ok(query) => self.evaluate_query(query),
-            Err(errors) => EngineResponse::error(format_parse_errors(errors)),
+            Err(errors) => EngineResponse::error(format_parse_errors(input, errors)),
         }
     }
 
@@ -510,11 +510,172 @@ fn format_float(value: f64) -> String {
     }
 }
 
-fn format_parse_errors(errors: Vec<Simple<char>>) -> Vec<String> {
-    errors
-        .into_iter()
-        .map(|err| format!("Parse error: {}", err))
-        .collect()
+fn format_parse_errors(input: &str, errors: Vec<Simple<char>>) -> Vec<String> {
+    #[derive(Clone)]
+    struct LineInfo {
+        number: usize,
+        start_char: usize,
+        end_char: usize,
+        content: String,
+    }
+
+    fn build_line_info(input: &str) -> Vec<LineInfo> {
+        let mut lines = Vec::new();
+        let mut char_offset = 0usize;
+
+        for (idx, chunk) in input.split_inclusive('\n').enumerate() {
+            let has_newline = chunk.ends_with('\n');
+            let content = if has_newline {
+                &chunk[..chunk.len() - 1]
+            } else {
+                chunk
+            };
+            let content_chars = content.chars().count();
+            let start_char = char_offset;
+            let end_char = start_char + content_chars;
+            lines.push(LineInfo {
+                number: idx + 1,
+                start_char,
+                end_char,
+                content: content.to_string(),
+            });
+
+            char_offset = end_char;
+            if has_newline {
+                char_offset += 1; // account for newline character
+            }
+        }
+
+        if lines.is_empty() {
+            lines.push(LineInfo {
+                number: 1,
+                start_char: 0,
+                end_char: 0,
+                content: String::new(),
+            });
+        }
+
+        lines
+    }
+
+    fn locate_line<'a>(lines: &'a [LineInfo], char_index: usize) -> &'a LineInfo {
+        lines
+            .iter()
+            .find(|line| char_index >= line.start_char && char_index <= line.end_char)
+            .unwrap_or_else(|| {
+                lines
+                    .iter()
+                    .rev()
+                    .find(|line| char_index >= line.start_char)
+                    .unwrap_or(&lines[0])
+            })
+    }
+
+    fn char_index_to_column(line: &LineInfo, char_index: usize) -> usize {
+        let relative = if char_index < line.start_char {
+            0
+        } else {
+            char_index.saturating_sub(line.start_char)
+        };
+        relative.min(line.content.chars().count()) + 1
+    }
+
+    fn pointer_line(line: &LineInfo, span: &std::ops::Range<usize>) -> (usize, usize) {
+        let line_len = line.content.chars().count();
+        let start_offset = if span.start < line.start_char {
+            0
+        } else {
+            span.start.saturating_sub(line.start_char)
+        };
+        let start_offset = start_offset.min(line_len);
+        let span_len = if span.end > span.start {
+            span.end - span.start
+        } else {
+            1
+        };
+        let available = line_len.saturating_sub(start_offset);
+        let pointer_width = if available == 0 {
+            1
+        } else {
+            span_len.min(available).max(1)
+        };
+
+        (start_offset, pointer_width)
+    }
+
+    fn format_expected(err: &Simple<char>) -> Vec<String> {
+        let mut tokens: Vec<String> = err
+            .expected()
+            .into_iter()
+            .map(|expected| match expected {
+                Some(ch) => format!("'{}'", ch),
+                None => "end of input".to_string(),
+            })
+            .collect();
+        tokens.sort();
+        tokens.dedup();
+        tokens
+    }
+
+    let lines = build_line_info(input);
+    let mut formatted = Vec::new();
+
+    for error in errors {
+        let span = error.span();
+        let line = locate_line(&lines, span.start);
+        let column = char_index_to_column(line, span.start);
+        let (pointer_offset, pointer_width) = pointer_line(line, &span);
+
+        let expected_tokens = format_expected(&error);
+        let reason = match error.reason() {
+            SimpleReason::Unexpected => {
+                let expected = if expected_tokens.is_empty() {
+                    None
+                } else {
+                    Some(expected_tokens.join(", "))
+                };
+                match (expected, error.found()) {
+                    (Some(expected), Some(found)) => {
+                        format!("expected {}, found '{}'", expected, found)
+                    }
+                    (Some(expected), None) => {
+                        format!("expected {}, found end of input", expected)
+                    }
+                    (None, Some(found)) => format!("unexpected '{}'", found),
+                    (None, None) => "unexpected end of input".to_string(),
+                }
+            }
+            SimpleReason::Unclosed {
+                span: unclosed_span,
+                delimiter,
+            } => {
+                let delimiter = format!("'{}'", delimiter);
+                let expected = if expected_tokens.is_empty() {
+                    delimiter.clone()
+                } else {
+                    expected_tokens.join(", ")
+                };
+                format!(
+                    "unclosed {}, expected {} to close span {:?}",
+                    delimiter, expected, unclosed_span
+                )
+            }
+            SimpleReason::Custom(msg) => msg.to_string(),
+        };
+
+        formatted.push(format!(
+            "Parse error at line {}, column {}: {}",
+            line.number, column, reason
+        ));
+        formatted.push(format!("  {}", line.content));
+        formatted.push(format!(
+            "  {}{}",
+            " ".repeat(pointer_offset),
+            "^".repeat(pointer_width)
+        ));
+    }
+
+    formatted
 }
 
 #[cfg(test)]
@@ -616,11 +777,14 @@ mod tests {
         let mut engine = ReplEngine::new();
         let response = engine.process_line("parent(john, mary)");
         assert_eq!(response.kind, ResponseKind::Error);
-        assert!(!response.lines.is_empty());
-        assert!(
-            response.lines[0].contains("Parse error"),
-            "expected parse error message, got {:?}",
-            response.lines
+        assert_eq!(
+            response.lines,
+            vec![
+                "Parse error at line 1, column 19: expected '%', '.', '/', ':', found end of input"
+                    .to_string(),
+                "  parent(john, mary)".to_string(),
+                "                    ^".to_string(),
+            ]
         );
     }
 }
