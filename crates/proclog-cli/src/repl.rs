@@ -44,10 +44,6 @@ impl EngineResponse {
             lines,
         }
     }
-
-    fn error_message(message: impl Into<String>) -> Self {
-        Self::error(vec![message.into()])
-    }
 }
 
 /// Core ProcLog REPL engine.
@@ -114,11 +110,6 @@ impl ReplEngine {
                         Statement::ChoiceRule(choice) => {
                             summary.choice_rules += 1;
                             to_add.push(Statement::ChoiceRule(choice));
-                        }
-                        Statement::ProbFact(_) => {
-                            return EngineResponse::error_message(
-                                "Probabilistic facts are not supported in the REPL yet.",
-                            );
                         }
                         Statement::Test(_) => {
                             summary.skipped_tests += 1;
@@ -299,11 +290,6 @@ impl ReplEngine {
                 }
                 Statement::ConstDecl(_) => {
                     // Already captured in const_env
-                }
-                Statement::ProbFact(_) => {
-                    return Err(
-                        "Probabilistic facts are not supported in the REPL yet.".to_string()
-                    );
                 }
                 Statement::Test(_) => {
                     return Err("Test blocks are not supported in the REPL.".to_string());

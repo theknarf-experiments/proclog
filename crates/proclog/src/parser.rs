@@ -9,7 +9,6 @@
 //! - **Rules**: `ancestor(X, Z) :- parent(X, Y), ancestor(Y, Z).`
 //! - **Constraints**: `:- unsafe(X).`
 //! - **Choice Rules**: `{ selected(X) : item(X) } 2.`
-//! - **Probabilistic Facts**: `0.7 :: treasure(X).`
 //! - **Constants**: `#const max_items = 10.`
 //! - **Ranges**: `cell(1..width, 1..height).`
 //! - **Built-ins**: Arithmetic (`X + Y = Z`) and comparisons (`X > 5`)
@@ -363,30 +362,6 @@ fn constraint() -> impl Parser<char, Statement, Error = ParseError> + Clone {
         .labelled("constraint")
 }
 
-/// Parse a probabilistic fact
-fn prob_fact() -> impl Parser<char, Statement, Error = ParseError> + Clone {
-    // Parse a float probability (0.0 to 1.0)
-    text::digits(10)
-        .then_ignore(just('.'))
-        .then(text::digits(10))
-        .try_map(|(whole, frac), span| {
-            let prob_str = format!("{}.{}", whole, frac);
-            match prob_str.parse::<f64>() {
-                Ok(p) if (0.0..=1.0).contains(&p) => Ok(p),
-                Ok(_) => Err(ParseError::custom(
-                    span,
-                    "probability must be between 0.0 and 1.0",
-                )),
-                Err(_) => Err(ParseError::custom(span, "invalid probability")),
-            }
-        })
-        .then_ignore(just("::").padded())
-        .then(atom())
-        .then_ignore(just('.').padded())
-        .map(|(probability, atom)| Statement::ProbFact(ProbFact { probability, atom }))
-        .labelled("probabilistic fact")
-}
-
 /// Parse a constant declaration: #const name = value.
 /// Supports all value types: integers, floats, booleans, strings, atoms
 fn const_decl() -> impl Parser<char, Statement, Error = ParseError> + Clone {
@@ -474,15 +449,8 @@ fn test_block() -> impl Parser<char, Statement, Error = ParseError> + Clone {
         // Try test case first (starts with ?-)
         test_case().map(|tc| (None, Some(tc))),
         // Then try regular statements (but not other test blocks)
-        choice((
-            const_decl(),
-            prob_fact(),
-            choice_rule(),
-            constraint(),
-            rule(),
-            fact(),
-        ))
-        .map(|stmt| (Some(stmt), None)),
+        choice((const_decl(), choice_rule(), constraint(), rule(), fact()))
+            .map(|stmt| (Some(stmt), None)),
     ))
     .padded_by(spacing());
 
@@ -589,9 +557,8 @@ fn choice_rule() -> impl Parser<char, Statement, Error = ParseError> + Clone {
 /// Parse a statement
 fn statement() -> impl Parser<char, Statement, Error = ParseError> + Clone {
     choice((
-        test_block(), // Try #test first (distinctive prefix)
-        const_decl(), // Try #const (distinctive prefix)
-        prob_fact(),
+        test_block(),  // Try #test first (distinctive prefix)
+        const_decl(),  // Try #const (distinctive prefix)
         choice_rule(), // Try choice rules (distinctive { prefix)
         constraint(),
         rule(),
@@ -1010,24 +977,6 @@ mod tests {
                 assert_eq!(constraint.body.len(), 1);
             }
             _ => panic!("Expected constraint"),
-        }
-    }
-
-    #[test]
-    fn test_parse_prob_fact() {
-        let result = parse_program("0.7 :: treasure(X).");
-        assert!(result.is_ok());
-        let program = result.unwrap();
-        assert_eq!(program.statements.len(), 1);
-        match &program.statements[0] {
-            Statement::ProbFact(prob_fact) => {
-                assert_eq!(prob_fact.probability, 0.7);
-                assert_eq!(
-                    prob_fact.atom.predicate,
-                    Intern::new("treasure".to_string())
-                );
-            }
-            _ => panic!("Expected probabilistic fact"),
         }
     }
 

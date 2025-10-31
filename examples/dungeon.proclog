@@ -7,11 +7,11 @@
 entrance(room_0).
 total_rooms(10).
 
-% Probabilistic facts - room types with probabilities
-0.5 :: room_type(small).
-0.3 :: room_type(large).
-0.15 :: room_type(treasure).
-0.05 :: room_type(boss).
+% Room type catalog
+room_type(small).
+room_type(large).
+room_type(treasure).
+room_type(boss).
 
 % Rules - define room connections
 connected(R1, R2) :- adjacent(R1, R2).
