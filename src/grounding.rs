@@ -106,8 +106,9 @@ pub fn satisfy_body(body: &[Literal], db: &FactDatabase) -> Vec<Substitution> {
 
                         // Combine substitutions
                         for rest_subst in rest_substs {
-                            let combined = combine_substs(&subst, &rest_subst);
-                            all_substs.push(combined);
+                            if let Some(combined) = combine_substs(&subst, &rest_subst) {
+                                all_substs.push(combined);
+                            }
                         }
                     }
 
@@ -163,17 +164,28 @@ fn apply_subst_to_literal(subst: &Substitution, literal: &Literal) -> Literal {
     }
 }
 
-/// Combine two substitutions
-fn combine_substs(s1: &Substitution, s2: &Substitution) -> Substitution {
+/// Combine two substitutions, returning `None` if they conflict.
+fn combine_substs(s1: &Substitution, s2: &Substitution) -> Option<Substitution> {
     let mut combined = s1.clone();
 
-    // Add bindings from s2, applying s1 to them first
     for (var, term) in s2.iter() {
-        let applied_term = s1.apply(term);
-        combined.bind(var.clone(), applied_term);
+        // Apply bindings from both substitutions before comparing.
+        let term_applied_s2 = s2.apply(term);
+        let candidate = combined.apply(&term_applied_s2);
+
+        if let Some(existing) = combined.get(var) {
+            let existing_applied_s2 = s2.apply(existing);
+            let existing_resolved = combined.apply(&existing_applied_s2);
+
+            if existing_resolved != candidate {
+                return None;
+            }
+        }
+
+        combined.bind(var.clone(), candidate);
     }
 
-    combined
+    Some(combined)
 }
 
 /// Apply substitution to a built-in predicate
@@ -302,8 +314,9 @@ fn satisfy_body_mixed_recursive(
                         );
 
                         for rest_subst in rest_substs {
-                            let combined = combine_substs(&subst, &rest_subst);
-                            all_substs.push(combined);
+                            if let Some(combined) = combine_substs(&subst, &rest_subst) {
+                                all_substs.push(combined);
+                            }
                         }
                     }
 
@@ -568,6 +581,44 @@ mod tests {
 
     fn make_rule(head: Atom, body: Vec<Literal>) -> Rule {
         Rule { head, body }
+    }
+
+    #[test]
+    fn test_combine_substs_conflicting_bindings_are_filtered() {
+        let mut s1 = Substitution::new();
+        s1.bind(Intern::new("X".to_string()), atom_const("a"));
+
+        let mut s2 = Substitution::new();
+        s2.bind(Intern::new("X".to_string()), atom_const("b"));
+
+        assert!(combine_substs(&s1, &s2).is_none());
+    }
+
+    #[test]
+    fn test_combine_substs_indirect_conflict_is_filtered() {
+        let mut s1 = Substitution::new();
+        s1.bind(Intern::new("X".to_string()), var("Y"));
+
+        let mut s2 = Substitution::new();
+        s2.bind(Intern::new("Y".to_string()), atom_const("a"));
+        s2.bind(Intern::new("X".to_string()), atom_const("b"));
+
+        assert!(combine_substs(&s1, &s2).is_none());
+    }
+
+    #[test]
+    fn test_combine_substs_indirect_resolution_succeeds() {
+        let mut s1 = Substitution::new();
+        s1.bind(Intern::new("X".to_string()), var("Y"));
+
+        let mut s2 = Substitution::new();
+        s2.bind(Intern::new("Y".to_string()), atom_const("a"));
+        s2.bind(Intern::new("X".to_string()), atom_const("a"));
+
+        let combined = combine_substs(&s1, &s2).expect("substitutions should merge");
+
+        assert_eq!(combined.apply(&var("X")), atom_const("a"));
+        assert_eq!(combined.apply(&var("Y")), atom_const("a"));
     }
 
     // Basic grounding tests
