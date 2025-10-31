@@ -1,0 +1,13 @@
+[package]
+name = "proclog-cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+proclog = { path = "../proclog" }
+chumsky = { workspace = true }
+internment = { workspace = true }
+clap = { workspace = true }
+notify = { workspace = true }
+crossterm = { workspace = true }
+ratatui = { workspace = true }

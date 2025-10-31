@@ -3,17 +3,17 @@
 //! This module implements functionality to run ProcLog tests defined with `#test` blocks.
 //! Each test block contains facts, rules, and queries with assertions to verify behavior.
 
-use crate::asp::{asp_evaluation, AnswerSet};
-use crate::ast::{
+use internment::Intern;
+use proclog::asp::{asp_evaluation, AnswerSet};
+use proclog::ast::{
     Atom, ChoiceRule, Constraint, Literal, Rule, Statement, Symbol, Term, TestBlock, TestCase,
 };
-use crate::builtins;
-use crate::constants::ConstantEnv;
-use crate::database::FactDatabase;
-use crate::evaluation::{stratified_evaluation_with_constraints, EvaluationError};
-use crate::query::evaluate_query;
-use crate::unification::{unify_atoms, Substitution};
-use internment::Intern;
+use proclog::builtins;
+use proclog::constants::ConstantEnv;
+use proclog::database::FactDatabase;
+use proclog::evaluation::{stratified_evaluation_with_constraints, EvaluationError};
+use proclog::query::evaluate_query;
+use proclog::unification::{unify_atoms, Substitution};
 use std::collections::{HashMap, HashSet};
 
 /// Result of running a single test case
@@ -136,7 +136,7 @@ pub fn run_test_block(base_statements: &[Statement], test_block: &TestBlock) -> 
                         })
                         .collect();
 
-                    crate::ast::ChoiceElement {
+                    proclog::ast::ChoiceElement {
                         atom: substituted_atom,
                         condition: substituted_condition,
                     }
@@ -147,12 +147,8 @@ pub fn run_test_block(base_statements: &[Statement], test_block: &TestBlock) -> 
                 .body
                 .iter()
                 .map(|lit| match lit {
-                    Literal::Positive(atom) => {
-                        Literal::Positive(const_env.substitute_atom(atom))
-                    }
-                    Literal::Negative(atom) => {
-                        Literal::Negative(const_env.substitute_atom(atom))
-                    }
+                    Literal::Positive(atom) => Literal::Positive(const_env.substitute_atom(atom)),
+                    Literal::Negative(atom) => Literal::Negative(const_env.substitute_atom(atom)),
                 })
                 .collect();
 
@@ -167,7 +163,7 @@ pub fn run_test_block(base_statements: &[Statement], test_block: &TestBlock) -> 
         Statement::ProbFact(prob) => {
             // Substitute constants in probabilistic fact
             let substituted_atom = const_env.substitute_atom(&prob.atom);
-            prob_facts.push(crate::ast::ProbFact {
+            prob_facts.push(proclog::ast::ProbFact {
                 probability: prob.probability,
                 atom: substituted_atom,
             });
@@ -201,7 +197,7 @@ pub fn run_test_block(base_statements: &[Statement], test_block: &TestBlock) -> 
 
         // Add facts
         for atom in initial_facts.all_facts() {
-            statements.push(Statement::Fact(crate::ast::Fact { atom: atom.clone() }));
+            statements.push(Statement::Fact(proclog::ast::Fact { atom: atom.clone() }));
         }
 
         // Add rules
@@ -219,7 +215,7 @@ pub fn run_test_block(base_statements: &[Statement], test_block: &TestBlock) -> 
             statements.push(Statement::ChoiceRule(choice.clone()));
         }
 
-        let program = crate::ast::Program { statements };
+        let program = proclog::ast::Program { statements };
         Ok(asp_evaluation(&program))
     } else {
         // Use regular Datalog evaluation with constraint checking
@@ -236,10 +232,7 @@ pub fn run_test_block(base_statements: &[Statement], test_block: &TestBlock) -> 
             let mut case_results = Vec::new();
             for test_case in &test_block.test_cases {
                 let query_text = format_query(&test_case.query);
-                let message = format!(
-                    "✗ Evaluation failed before running {}: {}",
-                    query_text, err
-                );
+                let message = format!("✗ Evaluation failed before running {}: {}", query_text, err);
                 case_results.push(TestCaseResult {
                     passed: false,
                     message,
@@ -297,7 +290,7 @@ fn run_test_case_asp(
         })
         .collect();
 
-    let query = crate::ast::Query { body: query_body };
+    let query = proclog::ast::Query { body: query_body };
 
     // For ASP, a query succeeds if it succeeds in at least one answer set
     let mut all_results = Vec::new();
@@ -409,7 +402,7 @@ fn run_test_case_asp(
 
 /// Evaluate a query against both derived facts and local rules
 fn evaluate_query_with_rules(
-    query: &crate::ast::Query,
+    query: &proclog::ast::Query,
     db: &FactDatabase,
     rules: &[Rule],
 ) -> Vec<Substitution> {
@@ -566,7 +559,7 @@ fn combine_substitutions(first: &Substitution, second: &Substitution) -> Substit
     combined
 }
 
-fn should_use_rule_fallback(query: &crate::ast::Query, rules: &[Rule]) -> bool {
+fn should_use_rule_fallback(query: &proclog::ast::Query, rules: &[Rule]) -> bool {
     let mut found_relevant_rule = false;
 
     for literal in &query.body {
@@ -788,7 +781,7 @@ fn atoms_match(a: &Atom, b: &Atom) -> bool {
 }
 
 /// Format a query for display
-fn format_query(query: &crate::ast::Query) -> String {
+fn format_query(query: &proclog::ast::Query) -> String {
     let literals: Vec<String> = query
         .body
         .iter()
@@ -803,8 +796,8 @@ fn format_query(query: &crate::ast::Query) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::*;
-    use crate::parser::parse_program;
+    use proclog::ast::*;
+    use proclog::parser::parse_program;
 
     #[test]
     fn test_simple_passing_test() {
@@ -869,13 +862,14 @@ mod tests {
         };
 
         let result = run_test_block(&[], test_block);
-        assert!(!result.passed, "Test should fail due to constraint violation");
+        assert!(
+            !result.passed,
+            "Test should fail due to constraint violation"
+        );
         assert_eq!(result.passed_cases, 0);
         assert_eq!(result.case_results.len(), 1);
         assert!(
-            result.case_results[0]
-                .message
-                .contains("Constraint"),
+            result.case_results[0].message.contains("Constraint"),
             "Expected constraint failure message, got: {}",
             result.case_results[0].message
         );
@@ -946,9 +940,9 @@ mod tests {
         assert_eq!(test_block.statements.len(), 7);
         assert_eq!(test_block.test_cases.len(), 4);
 
-        use crate::constants::ConstantEnv;
-        use crate::evaluation::semi_naive_evaluation;
         use internment::Intern;
+        use proclog::constants::ConstantEnv;
+        use proclog::evaluation::semi_naive_evaluation;
 
         let const_env = ConstantEnv::from_statements(&test_block.statements);
         let mut initial_facts = FactDatabase::new();
