@@ -46,7 +46,9 @@ impl std::fmt::Display for EvaluationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             EvaluationError::Safety(e) => write!(f, "Safety error: {}", e),
-            EvaluationError::Stratification(e) => write!(f, "Stratification error: {:?}", e),
+            EvaluationError::Stratification(e) => {
+                write!(f, "Stratification error: {}", e)
+            }
             EvaluationError::Derivation(e) => write!(f, "Derivation error: {}", e),
             EvaluationError::ConstraintViolation {
                 constraint,
@@ -1127,16 +1129,55 @@ mod tests {
 
     #[test]
     fn test_stratified_evaluation_rejects_negative_cycle() {
-        // p(X) :- not p(X).  [Illegal - cycle through negation!]
-        let rules = vec![make_rule(
-            make_atom("p", vec![var("X")]),
-            vec![Literal::Negative(make_atom("p", vec![var("X")]))],
-        )];
+        // p(X) :- q(X), not r(X).
+        // r(X) :- q(X), not p(X).  [Cycle through negation!]
+        // q(X) :- base(X).
+        let rules = vec![
+            make_rule(
+                make_atom("p", vec![var("X")]),
+                vec![
+                    Literal::Positive(make_atom("q", vec![var("X")])),
+                    Literal::Negative(make_atom("r", vec![var("X")])),
+                ],
+            ),
+            make_rule(
+                make_atom("r", vec![var("X")]),
+                vec![
+                    Literal::Positive(make_atom("q", vec![var("X")])),
+                    Literal::Negative(make_atom("p", vec![var("X")])),
+                ],
+            ),
+            make_rule(
+                make_atom("q", vec![var("X")]),
+                vec![Literal::Positive(make_atom("base", vec![var("X")]))],
+            ),
+        ];
 
-        let db = FactDatabase::new();
+        let mut db = FactDatabase::new();
+        db.insert(make_atom("base", vec![atom_const("a")])).unwrap();
         let result = stratified_evaluation(&rules, db);
 
-        assert!(result.is_err());
+        let err = result.unwrap_err();
+        let err_display = err.to_string();
+        assert!(err_display.starts_with("Stratification error: Cycle through negation detected"));
+
+        match err {
+            EvaluationError::Stratification(strat_err) => {
+                let strat_display = strat_err.to_string();
+                assert!(strat_display.starts_with("Cycle through negation detected"));
+
+                match strat_err {
+                    StratificationError::CycleThroughNegation(cycle) => {
+                        assert!(!cycle.is_empty());
+                        let first = cycle.first().unwrap().as_ref();
+                        let expected_tail = format!("{0} -> {0}", first);
+                        assert!(strat_display.ends_with(&expected_tail));
+                        assert!(err_display.ends_with(&expected_tail));
+                    }
+                }
+            }
+            _ => panic!("expected stratification error"),
+        }
     }
 
     #[test]
