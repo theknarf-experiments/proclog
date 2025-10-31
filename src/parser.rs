@@ -474,8 +474,15 @@ fn test_block() -> impl Parser<char, Statement, Error = ParseError> + Clone {
         // Try test case first (starts with ?-)
         test_case().map(|tc| (None, Some(tc))),
         // Then try regular statements (but not other test blocks)
-        choice((const_decl(), prob_fact(), choice_rule(), constraint(), rule(), fact()))
-            .map(|stmt| (Some(stmt), None)),
+        choice((
+            const_decl(),
+            prob_fact(),
+            choice_rule(),
+            constraint(),
+            rule(),
+            fact(),
+        ))
+        .map(|stmt| (Some(stmt), None)),
     ))
     .padded_by(spacing());
 
@@ -660,7 +667,11 @@ mod tests {
     fn test_string_literal_escape_sequences() {
         let input = "\"escaped\\\" newline\\n tab\\t backslash\\\\\"";
         let result = string_literal().parse(input);
-        assert!(result.is_ok(), "Failed to parse escapes: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Failed to parse escapes: {:?}",
+            result.err()
+        );
         let parsed = result.unwrap();
         assert_eq!(parsed, "escaped\" newline\n tab\t backslash\\");
     }
@@ -689,7 +700,11 @@ mod tests {
     fn test_string_literal_in_ast_has_interpreted_value() {
         let input = "value(\"line\\nnext\").";
         let result = parse_program(input);
-        assert!(result.is_ok(), "Failed to parse program: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Failed to parse program: {:?}",
+            result.err()
+        );
         let program = result.unwrap();
         match &program.statements[0] {
             Statement::Fact(fact) => {

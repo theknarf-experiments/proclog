@@ -88,7 +88,10 @@ pub fn naive_evaluation(rules: &[Rule], initial_facts: FactDatabase) -> FactData
         for rule in rules {
             let derived = ground_rule(rule, &db);
             for fact in derived {
-                if db.insert(fact) {
+                if db
+                    .insert(fact)
+                    .expect("derived non-ground fact during naive evaluation")
+                {
                     changed = true;
                 }
             }
@@ -122,8 +125,8 @@ pub fn semi_naive_evaluation(rules: &[Rule], initial_facts: FactDatabase) -> Fac
                 let derived = ground_rule(rule, &db);
                 for fact in derived {
                     if !db.contains(&fact) {
-                        db.insert(fact.clone());
-                        new_delta.insert(fact);
+                        db.insert(fact.clone()).unwrap();
+                        new_delta.insert(fact).unwrap();
                     }
                 }
             } else if rule.body.len() == 1 {
@@ -131,8 +134,8 @@ pub fn semi_naive_evaluation(rules: &[Rule], initial_facts: FactDatabase) -> Fac
                 let derived = ground_rule(rule, &delta);
                 for fact in derived {
                     if !db.contains(&fact) {
-                        db.insert(fact.clone());
-                        new_delta.insert(fact);
+                        db.insert(fact.clone()).unwrap();
+                        new_delta.insert(fact).unwrap();
                     }
                 }
             } else {
@@ -141,8 +144,8 @@ pub fn semi_naive_evaluation(rules: &[Rule], initial_facts: FactDatabase) -> Fac
                 let derived = ground_rule_semi_naive(rule, &delta, &db);
                 for fact in derived {
                     if !db.contains(&fact) {
-                        db.insert(fact.clone());
-                        new_delta.insert(fact);
+                        db.insert(fact.clone()).unwrap();
+                        new_delta.insert(fact).unwrap();
                     }
                 }
             }
@@ -191,7 +194,10 @@ pub fn naive_evaluation_instrumented(
             stats.rule_applications += 1;
             let derived = ground_rule(rule, &db);
             for fact in derived {
-                if db.insert(fact) {
+                if db
+                    .insert(fact)
+                    .expect("derived non-ground fact during semi-naive evaluation")
+                {
                     changed = true;
                     stats.facts_derived += 1;
                 }
@@ -231,8 +237,8 @@ pub fn semi_naive_evaluation_instrumented(
                 let derived = ground_rule(rule, &db);
                 for fact in derived {
                     if !db.contains(&fact) {
-                        db.insert(fact.clone());
-                        new_delta.insert(fact);
+                        db.insert(fact.clone()).unwrap();
+                        new_delta.insert(fact).unwrap();
                         stats.facts_derived += 1;
                     }
                 }
@@ -240,8 +246,8 @@ pub fn semi_naive_evaluation_instrumented(
                 let derived = ground_rule(rule, &delta);
                 for fact in derived {
                     if !db.contains(&fact) {
-                        db.insert(fact.clone());
-                        new_delta.insert(fact);
+                        db.insert(fact.clone()).unwrap();
+                        new_delta.insert(fact).unwrap();
                         stats.facts_derived += 1;
                     }
                 }
@@ -249,8 +255,8 @@ pub fn semi_naive_evaluation_instrumented(
                 let derived = ground_rule_semi_naive(rule, &delta, &db);
                 for fact in derived {
                     if !db.contains(&fact) {
-                        db.insert(fact.clone());
-                        new_delta.insert(fact);
+                        db.insert(fact.clone()).unwrap();
+                        new_delta.insert(fact).unwrap();
                         stats.facts_derived += 1;
                     }
                 }
@@ -394,7 +400,8 @@ mod tests {
         db.insert(make_atom(
             "parent",
             vec![atom_const("john"), atom_const("mary")],
-        ));
+        ))
+        .unwrap();
 
         let rules = vec![];
         let result = naive_evaluation(&rules, db.clone());
@@ -409,11 +416,13 @@ mod tests {
         db.insert(make_atom(
             "parent",
             vec![atom_const("john"), atom_const("mary")],
-        ));
+        ))
+        .unwrap();
         db.insert(make_atom(
             "parent",
             vec![atom_const("mary"), atom_const("alice")],
-        ));
+        ))
+        .unwrap();
 
         // Rule: grandparent(X, Z) :- parent(X, Y), parent(Y, Z).
         let rules = vec![make_rule(
@@ -437,9 +446,12 @@ mod tests {
     #[test]
     fn test_naive_evaluation_transitive_closure() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("edge", vec![atom_const("a"), atom_const("b")]));
-        db.insert(make_atom("edge", vec![atom_const("b"), atom_const("c")]));
-        db.insert(make_atom("edge", vec![atom_const("c"), atom_const("d")]));
+        db.insert(make_atom("edge", vec![atom_const("a"), atom_const("b")]))
+            .unwrap();
+        db.insert(make_atom("edge", vec![atom_const("b"), atom_const("c")]))
+            .unwrap();
+        db.insert(make_atom("edge", vec![atom_const("c"), atom_const("d")]))
+            .unwrap();
 
         // Rules for transitive closure:
         // path(X, Y) :- edge(X, Y).
@@ -481,7 +493,8 @@ mod tests {
         db.insert(make_atom(
             "parent",
             vec![atom_const("john"), atom_const("mary")],
-        ));
+        ))
+        .unwrap();
 
         let rules = vec![];
         let result = semi_naive_evaluation(&rules, db.clone());
@@ -495,11 +508,13 @@ mod tests {
         db.insert(make_atom(
             "parent",
             vec![atom_const("john"), atom_const("mary")],
-        ));
+        ))
+        .unwrap();
         db.insert(make_atom(
             "parent",
             vec![atom_const("mary"), atom_const("alice")],
-        ));
+        ))
+        .unwrap();
 
         let rules = vec![make_rule(
             make_atom("grandparent", vec![var("X"), var("Z")]),
@@ -521,9 +536,12 @@ mod tests {
     #[test]
     fn test_semi_naive_evaluation_transitive_closure() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("edge", vec![atom_const("a"), atom_const("b")]));
-        db.insert(make_atom("edge", vec![atom_const("b"), atom_const("c")]));
-        db.insert(make_atom("edge", vec![atom_const("c"), atom_const("d")]));
+        db.insert(make_atom("edge", vec![atom_const("a"), atom_const("b")]))
+            .unwrap();
+        db.insert(make_atom("edge", vec![atom_const("b"), atom_const("c")]))
+            .unwrap();
+        db.insert(make_atom("edge", vec![atom_const("c"), atom_const("d")]))
+            .unwrap();
 
         let rules = vec![
             make_rule(
@@ -555,9 +573,12 @@ mod tests {
     fn test_naive_vs_semi_naive_equivalence() {
         // Both algorithms should produce the same result
         let mut db = FactDatabase::new();
-        db.insert(make_atom("edge", vec![atom_const("a"), atom_const("b")]));
-        db.insert(make_atom("edge", vec![atom_const("b"), atom_const("c")]));
-        db.insert(make_atom("edge", vec![atom_const("c"), atom_const("d")]));
+        db.insert(make_atom("edge", vec![atom_const("a"), atom_const("b")]))
+            .unwrap();
+        db.insert(make_atom("edge", vec![atom_const("b"), atom_const("c")]))
+            .unwrap();
+        db.insert(make_atom("edge", vec![atom_const("c"), atom_const("d")]))
+            .unwrap();
 
         let rules = vec![
             make_rule(
@@ -620,7 +641,7 @@ mod tests {
         for statement in program.statements {
             match statement {
                 Statement::Fact(fact) => {
-                    initial_db.insert(fact.atom);
+                    initial_db.insert(fact.atom).unwrap();
                 }
                 Statement::Rule(rule) => {
                     rules.push(rule);
@@ -672,9 +693,12 @@ mod tests {
     fn test_semi_naive_efficiency_vs_naive() {
         // Semi-naive should do fewer rule applications than naive
         let mut db = FactDatabase::new();
-        db.insert(make_atom("edge", vec![atom_const("a"), atom_const("b")]));
-        db.insert(make_atom("edge", vec![atom_const("b"), atom_const("c")]));
-        db.insert(make_atom("edge", vec![atom_const("c"), atom_const("d")]));
+        db.insert(make_atom("edge", vec![atom_const("a"), atom_const("b")]))
+            .unwrap();
+        db.insert(make_atom("edge", vec![atom_const("b"), atom_const("c")]))
+            .unwrap();
+        db.insert(make_atom("edge", vec![atom_const("c"), atom_const("d")]))
+            .unwrap();
 
         let rules = vec![
             make_rule(
@@ -717,8 +741,10 @@ mod tests {
     fn test_semi_naive_doesnt_rederive_facts() {
         // This test ensures we're not deriving the same fact multiple times
         let mut db = FactDatabase::new();
-        db.insert(make_atom("edge", vec![atom_const("a"), atom_const("b")]));
-        db.insert(make_atom("edge", vec![atom_const("b"), atom_const("c")]));
+        db.insert(make_atom("edge", vec![atom_const("a"), atom_const("b")]))
+            .unwrap();
+        db.insert(make_atom("edge", vec![atom_const("b"), atom_const("c")]))
+            .unwrap();
 
         let rules = vec![
             make_rule(
@@ -755,11 +781,14 @@ mod tests {
         let mut db = FactDatabase::new();
 
         // A chain: a -> b -> c
-        db.insert(make_atom("edge", vec![atom_const("a"), atom_const("b")]));
-        db.insert(make_atom("edge", vec![atom_const("b"), atom_const("c")]));
+        db.insert(make_atom("edge", vec![atom_const("a"), atom_const("b")]))
+            .unwrap();
+        db.insert(make_atom("edge", vec![atom_const("b"), atom_const("c")]))
+            .unwrap();
 
         // A separate chain: x -> y
-        db.insert(make_atom("edge", vec![atom_const("x"), atom_const("y")]));
+        db.insert(make_atom("edge", vec![atom_const("x"), atom_const("y")]))
+            .unwrap();
 
         // Rule: path(X, Z) :- path(X, Y), edge(Y, Z)
         let rules = vec![
@@ -799,11 +828,16 @@ mod tests {
         let mut db = FactDatabase::new();
 
         // A larger graph to stress test
-        db.insert(make_atom("edge", vec![atom_const("a"), atom_const("b")]));
-        db.insert(make_atom("edge", vec![atom_const("b"), atom_const("c")]));
-        db.insert(make_atom("edge", vec![atom_const("c"), atom_const("d")]));
-        db.insert(make_atom("edge", vec![atom_const("d"), atom_const("e")]));
-        db.insert(make_atom("edge", vec![atom_const("b"), atom_const("f")])); // Branch
+        db.insert(make_atom("edge", vec![atom_const("a"), atom_const("b")]))
+            .unwrap();
+        db.insert(make_atom("edge", vec![atom_const("b"), atom_const("c")]))
+            .unwrap();
+        db.insert(make_atom("edge", vec![atom_const("c"), atom_const("d")]))
+            .unwrap();
+        db.insert(make_atom("edge", vec![atom_const("d"), atom_const("e")]))
+            .unwrap();
+        db.insert(make_atom("edge", vec![atom_const("b"), atom_const("f")]))
+            .unwrap(); // Branch
 
         let rules = vec![
             make_rule(
@@ -845,15 +879,18 @@ mod tests {
         db.insert(make_atom(
             "parent",
             vec![atom_const("alice"), atom_const("bob")],
-        ));
+        ))
+        .unwrap();
         db.insert(make_atom(
             "parent",
             vec![atom_const("bob"), atom_const("charlie")],
-        ));
+        ))
+        .unwrap();
         db.insert(make_atom(
             "parent",
             vec![atom_const("charlie"), atom_const("dave")],
-        ));
+        ))
+        .unwrap();
 
         let rules = vec![
             // ancestor(X,Y) :- parent(X,Y)
@@ -930,7 +967,7 @@ mod tests {
         for statement in program.statements {
             match statement {
                 Statement::Fact(fact) => {
-                    initial_db.insert(fact.atom);
+                    initial_db.insert(fact.atom).unwrap();
                 }
                 Statement::Rule(rule) => {
                     rules.push(rule);
@@ -967,9 +1004,12 @@ mod tests {
     #[test]
     fn test_stratified_evaluation_simple_negation() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("bird", vec![atom_const("tweety")]));
-        db.insert(make_atom("bird", vec![atom_const("polly")]));
-        db.insert(make_atom("penguin", vec![atom_const("polly")]));
+        db.insert(make_atom("bird", vec![atom_const("tweety")]))
+            .unwrap();
+        db.insert(make_atom("bird", vec![atom_const("polly")]))
+            .unwrap();
+        db.insert(make_atom("penguin", vec![atom_const("polly")]))
+            .unwrap();
 
         // Rule: flies(X) :- bird(X), not penguin(X).
         let rules = vec![make_rule(
@@ -993,7 +1033,7 @@ mod tests {
     #[test]
     fn test_stratified_evaluation_chain_of_negations() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("base", vec![atom_const("a")]));
+        db.insert(make_atom("base", vec![atom_const("a")])).unwrap();
 
         // Stratum 0: p(X) :- base(X).
         // Stratum 1: q(X) :- base(X), not p(X).
@@ -1076,7 +1116,7 @@ mod tests {
         for statement in program.statements {
             match statement {
                 Statement::Fact(fact) => {
-                    initial_db.insert(fact.atom);
+                    initial_db.insert(fact.atom).unwrap();
                 }
                 Statement::Rule(rule) => {
                     rules.push(rule);
@@ -1135,7 +1175,7 @@ mod tests {
         for statement in program.statements {
             match statement {
                 Statement::Fact(fact) => {
-                    initial_db.insert(fact.atom);
+                    initial_db.insert(fact.atom).unwrap();
                 }
                 Statement::Rule(rule) => {
                     rules.push(rule);
@@ -1206,7 +1246,7 @@ mod tests {
         for statement in program.statements {
             match statement {
                 Statement::Fact(fact) => {
-                    initial_db.insert(fact.atom);
+                    initial_db.insert(fact.atom).unwrap();
                 }
                 Statement::Rule(rule) => {
                     rules.push(rule);
@@ -1292,7 +1332,7 @@ mod tests {
         for statement in program.statements {
             match statement {
                 Statement::Fact(fact) => {
-                    initial_db.insert(fact.atom);
+                    initial_db.insert(fact.atom).unwrap();
                 }
                 Statement::Rule(rule) => {
                     rules.push(rule);
@@ -1365,7 +1405,7 @@ mod tests {
         for statement in program.statements {
             match statement {
                 Statement::Fact(fact) => {
-                    initial_db.insert(fact.atom);
+                    initial_db.insert(fact.atom).unwrap();
                 }
                 Statement::Rule(rule) => {
                     rules.push(rule);
@@ -1419,11 +1459,13 @@ mod tests {
         for i in 0..10 {
             let from = format!("n{}", i);
             let to = format!("n{}", i + 1);
-            db.insert(make_atom("edge", vec![atom_const(&from), atom_const(&to)]));
+            db.insert(make_atom("edge", vec![atom_const(&from), atom_const(&to)]))
+                .unwrap();
         }
 
         // Mark some nodes as special
-        db.insert(make_atom("special", vec![atom_const("n5")]));
+        db.insert(make_atom("special", vec![atom_const("n5")]))
+            .unwrap();
 
         // Stratum 0: Compute reachability
         // Stratum 1: Compute non-special reachability
@@ -1510,7 +1552,7 @@ mod tests {
         for statement in program.statements {
             match statement {
                 Statement::Fact(fact) => {
-                    initial_db.insert(fact.atom);
+                    initial_db.insert(fact.atom).unwrap();
                 }
                 Statement::Rule(rule) => {
                     rules.push(rule);
@@ -1582,7 +1624,7 @@ mod tests {
         for statement in program.statements {
             match statement {
                 Statement::Fact(fact) => {
-                    initial_db.insert(fact.atom);
+                    initial_db.insert(fact.atom).unwrap();
                 }
                 Statement::Rule(rule) => {
                     rules.push(rule);
@@ -1647,33 +1689,40 @@ mod tests {
         let mut db = FactDatabase::new();
 
         // Integer facts
-        db.insert(make_atom("health", vec![atom_const("player"), int(100)]));
-        db.insert(make_atom("damage", vec![atom_const("enemy"), int(-25)]));
-        db.insert(make_atom("score", vec![int(0)]));
+        db.insert(make_atom("health", vec![atom_const("player"), int(100)]))
+            .unwrap();
+        db.insert(make_atom("damage", vec![atom_const("enemy"), int(-25)]))
+            .unwrap();
+        db.insert(make_atom("score", vec![int(0)])).unwrap();
 
         // Float facts
         db.insert(make_atom(
             "position",
             vec![atom_const("player"), float(3.14), float(-2.5)],
-        ));
-        db.insert(make_atom("speed", vec![float(10.5)]));
+        ))
+        .unwrap();
+        db.insert(make_atom("speed", vec![float(10.5)])).unwrap();
 
         // Boolean facts
         db.insert(make_atom(
             "is_alive",
             vec![atom_const("player"), boolean(true)],
-        ));
+        ))
+        .unwrap();
         db.insert(make_atom(
             "has_key",
             vec![atom_const("player"), boolean(false)],
-        ));
+        ))
+        .unwrap();
 
         // String facts
         db.insert(make_atom(
             "name",
             vec![atom_const("player"), string("Alice")],
-        ));
-        db.insert(make_atom("message", vec![string("Hello")]));
+        ))
+        .unwrap();
+        db.insert(make_atom("message", vec![string("Hello")]))
+            .unwrap();
 
         // Compound term facts
         db.insert(make_atom(
@@ -1682,7 +1731,8 @@ mod tests {
                 atom_const("player"),
                 compound("item", vec![atom_const("sword"), int(10), float(5.5)]),
             ],
-        ));
+        ))
+        .unwrap();
 
         // Rules using different datatypes
         let rules = vec![
@@ -1792,7 +1842,7 @@ mod tests {
         for statement in program.statements {
             match statement {
                 Statement::Fact(fact) => {
-                    initial_db.insert(fact.atom);
+                    initial_db.insert(fact.atom).unwrap();
                 }
                 Statement::Rule(rule) => {
                     rules.push(rule);
@@ -1841,14 +1891,16 @@ mod tests {
                 compound("node", vec![atom_const("a"), int(1)]),
                 compound("node", vec![atom_const("b"), int(2)]),
             ],
-        ));
+        ))
+        .unwrap();
         db.insert(make_atom(
             "edge",
             vec![
                 compound("node", vec![atom_const("b"), int(2)]),
                 compound("node", vec![atom_const("c"), int(3)]),
             ],
-        ));
+        ))
+        .unwrap();
 
         // Transitive closure with compound terms
         let rules = vec![
@@ -1891,19 +1943,24 @@ mod tests {
         let mut db = FactDatabase::new();
 
         // Temperature readings
-        db.insert(make_atom("temp", vec![atom_const("room1"), float(20.5)]));
-        db.insert(make_atom("temp", vec![atom_const("room2"), float(15.0)]));
-        db.insert(make_atom("temp", vec![atom_const("room3"), float(25.5)]));
+        db.insert(make_atom("temp", vec![atom_const("room1"), float(20.5)]))
+            .unwrap();
+        db.insert(make_atom("temp", vec![atom_const("room2"), float(15.0)]))
+            .unwrap();
+        db.insert(make_atom("temp", vec![atom_const("room3"), float(25.5)]))
+            .unwrap();
 
         // Labels
         db.insert(make_atom(
             "label",
             vec![atom_const("room1"), string("comfortable")],
-        ));
+        ))
+        .unwrap();
         db.insert(make_atom(
             "label",
             vec![atom_const("room3"), string("warm")],
-        ));
+        ))
+        .unwrap();
         // room2 has no label
 
         // Rules - rewritten to be safe:
@@ -1947,8 +2004,8 @@ mod tests {
     #[test]
     fn test_constraint_no_violation() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("safe", vec![atom_const("a")]));
-        db.insert(make_atom("safe", vec![atom_const("b")]));
+        db.insert(make_atom("safe", vec![atom_const("a")])).unwrap();
+        db.insert(make_atom("safe", vec![atom_const("b")])).unwrap();
 
         // Constraint: :- unsafe(X).
         let constraints = vec![Constraint {
@@ -1962,8 +2019,9 @@ mod tests {
     #[test]
     fn test_constraint_violation() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("safe", vec![atom_const("a")]));
-        db.insert(make_atom("unsafe", vec![atom_const("b")]));
+        db.insert(make_atom("safe", vec![atom_const("a")])).unwrap();
+        db.insert(make_atom("unsafe", vec![atom_const("b")]))
+            .unwrap();
 
         // Constraint: :- unsafe(X).
         let constraints = vec![Constraint {
@@ -1987,9 +2045,12 @@ mod tests {
     #[test]
     fn test_constraint_multiple_violations() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("unsafe", vec![atom_const("a")]));
-        db.insert(make_atom("unsafe", vec![atom_const("b")]));
-        db.insert(make_atom("unsafe", vec![atom_const("c")]));
+        db.insert(make_atom("unsafe", vec![atom_const("a")]))
+            .unwrap();
+        db.insert(make_atom("unsafe", vec![atom_const("b")]))
+            .unwrap();
+        db.insert(make_atom("unsafe", vec![atom_const("c")]))
+            .unwrap();
 
         // Constraint: :- unsafe(X).
         let constraints = vec![Constraint {
@@ -2010,10 +2071,14 @@ mod tests {
     #[test]
     fn test_constraint_with_conjunction() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("player", vec![atom_const("alice")]));
-        db.insert(make_atom("player", vec![atom_const("bob")]));
-        db.insert(make_atom("dead", vec![atom_const("alice")]));
-        db.insert(make_atom("has_weapon", vec![atom_const("alice")]));
+        db.insert(make_atom("player", vec![atom_const("alice")]))
+            .unwrap();
+        db.insert(make_atom("player", vec![atom_const("bob")]))
+            .unwrap();
+        db.insert(make_atom("dead", vec![atom_const("alice")]))
+            .unwrap();
+        db.insert(make_atom("has_weapon", vec![atom_const("alice")]))
+            .unwrap();
 
         // Constraint: :- dead(X), has_weapon(X).
         // (Dead players shouldn't have weapons)
@@ -2031,9 +2096,12 @@ mod tests {
     #[test]
     fn test_constraint_with_negation() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("player", vec![atom_const("alice")]));
-        db.insert(make_atom("player", vec![atom_const("bob")]));
-        db.insert(make_atom("has_health", vec![atom_const("alice")]));
+        db.insert(make_atom("player", vec![atom_const("alice")]))
+            .unwrap();
+        db.insert(make_atom("player", vec![atom_const("bob")]))
+            .unwrap();
+        db.insert(make_atom("has_health", vec![atom_const("alice")]))
+            .unwrap();
         // bob has no health
 
         // Constraint: :- player(X), not has_health(X).
@@ -2059,9 +2127,12 @@ mod tests {
     #[test]
     fn test_stratified_evaluation_with_constraints_pass() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("edge", vec![atom_const("a"), atom_const("b")]));
-        db.insert(make_atom("edge", vec![atom_const("b"), atom_const("c")]));
-        db.insert(make_atom("blocked", vec![atom_const("d")]));
+        db.insert(make_atom("edge", vec![atom_const("a"), atom_const("b")]))
+            .unwrap();
+        db.insert(make_atom("edge", vec![atom_const("b"), atom_const("c")]))
+            .unwrap();
+        db.insert(make_atom("blocked", vec![atom_const("d")]))
+            .unwrap();
 
         // path(X, Y) :- edge(X, Y).
         // path(X, Z) :- path(X, Y), edge(Y, Z).
@@ -2099,9 +2170,12 @@ mod tests {
     #[test]
     fn test_stratified_evaluation_with_constraints_fail() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("edge", vec![atom_const("a"), atom_const("b")]));
-        db.insert(make_atom("edge", vec![atom_const("b"), atom_const("c")]));
-        db.insert(make_atom("blocked", vec![atom_const("a")])); // a is blocked!
+        db.insert(make_atom("edge", vec![atom_const("a"), atom_const("b")]))
+            .unwrap();
+        db.insert(make_atom("edge", vec![atom_const("b"), atom_const("c")]))
+            .unwrap();
+        db.insert(make_atom("blocked", vec![atom_const("a")]))
+            .unwrap(); // a is blocked!
 
         // path(X, Y) :- edge(X, Y).
         // path(X, Z) :- path(X, Y), edge(Y, Z).
@@ -2141,8 +2215,8 @@ mod tests {
     fn test_zero_arity_fact() {
         let mut db = FactDatabase::new();
         // winner. (no arguments)
-        db.insert(make_atom("winner", vec![]));
-        db.insert(make_atom("game_over", vec![]));
+        db.insert(make_atom("winner", vec![])).unwrap();
+        db.insert(make_atom("game_over", vec![])).unwrap();
 
         assert!(db.contains(&make_atom("winner", vec![])));
         assert!(db.contains(&make_atom("game_over", vec![])));
@@ -2151,8 +2225,8 @@ mod tests {
     #[test]
     fn test_zero_arity_rule() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("player_alive", vec![]));
-        db.insert(make_atom("has_treasure", vec![]));
+        db.insert(make_atom("player_alive", vec![])).unwrap();
+        db.insert(make_atom("has_treasure", vec![])).unwrap();
 
         // won :- player_alive, has_treasure.
         let rules = vec![make_rule(
@@ -2171,7 +2245,7 @@ mod tests {
     #[test]
     fn test_zero_arity_with_negation() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("game_active", vec![]));
+        db.insert(make_atom("game_active", vec![])).unwrap();
         // no winner fact
 
         // playing :- game_active, not winner.
@@ -2191,7 +2265,7 @@ mod tests {
     #[test]
     fn test_zero_arity_constraint() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("game_over", vec![]));
+        db.insert(make_atom("game_over", vec![])).unwrap();
 
         // Constraint: :- game_over.
         let constraints = vec![Constraint {
@@ -2205,9 +2279,11 @@ mod tests {
     #[test]
     fn test_zero_arity_mixed_with_normal() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("winner_exists", vec![]));
-        db.insert(make_atom("player", vec![atom_const("alice")]));
-        db.insert(make_atom("player", vec![atom_const("bob")]));
+        db.insert(make_atom("winner_exists", vec![])).unwrap();
+        db.insert(make_atom("player", vec![atom_const("alice")]))
+            .unwrap();
+        db.insert(make_atom("player", vec![atom_const("bob")]))
+            .unwrap();
 
         // is_winner(X) :- winner_exists, player(X).
         let rules = vec![make_rule(
@@ -2229,9 +2305,12 @@ mod tests {
     #[test]
     fn test_facts_only_no_rules() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("fact1", vec![atom_const("a")]));
-        db.insert(make_atom("fact2", vec![atom_const("b")]));
-        db.insert(make_atom("fact3", vec![atom_const("c")]));
+        db.insert(make_atom("fact1", vec![atom_const("a")]))
+            .unwrap();
+        db.insert(make_atom("fact2", vec![atom_const("b")]))
+            .unwrap();
+        db.insert(make_atom("fact3", vec![atom_const("c")]))
+            .unwrap();
 
         let rules = vec![]; // No rules!
 
@@ -2250,15 +2329,18 @@ mod tests {
         db.insert(make_atom(
             "parent",
             vec![atom_const("john"), atom_const("mary")],
-        ));
+        ))
+        .unwrap();
         db.insert(make_atom(
             "parent",
             vec![atom_const("john"), atom_const("bob")],
-        ));
+        ))
+        .unwrap();
         db.insert(make_atom(
             "parent",
             vec![atom_const("mary"), atom_const("alice")],
-        ));
+        ))
+        .unwrap();
 
         // Query: parent(john, X)?
         let query = make_atom("parent", vec![atom_const("john"), var("X")]);
@@ -2272,9 +2354,9 @@ mod tests {
     #[test]
     fn test_duplicate_facts() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("fact", vec![atom_const("a")]));
-        db.insert(make_atom("fact", vec![atom_const("a")])); // Duplicate!
-        db.insert(make_atom("fact", vec![atom_const("a")])); // Another duplicate!
+        db.insert(make_atom("fact", vec![atom_const("a")])).unwrap();
+        db.insert(make_atom("fact", vec![atom_const("a")])).unwrap(); // Duplicate!
+        db.insert(make_atom("fact", vec![atom_const("a")])).unwrap(); // Another duplicate!
 
         // HashSet should deduplicate
         assert_eq!(db.len(), 1);
@@ -2283,7 +2365,8 @@ mod tests {
     #[test]
     fn test_duplicate_rules() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("edge", vec![atom_const("a"), atom_const("b")]));
+        db.insert(make_atom("edge", vec![atom_const("a"), atom_const("b")]))
+            .unwrap();
 
         // Same rule twice
         let rules = vec![
@@ -2317,15 +2400,18 @@ mod tests {
     #[test]
     fn test_negated_compound_term_safe() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("item", vec![atom_const("sword")]));
-        db.insert(make_atom("item", vec![atom_const("shield")]));
+        db.insert(make_atom("item", vec![atom_const("sword")]))
+            .unwrap();
+        db.insert(make_atom("item", vec![atom_const("shield")]))
+            .unwrap();
         db.insert(make_atom(
             "dangerous",
             vec![Term::Compound(
                 Intern::new("property".to_string()),
                 vec![atom_const("sword"), atom_const("sharp")],
             )],
-        ));
+        ))
+        .unwrap();
 
         // safe_item(X) :- item(X), not dangerous(property(X, sharp)).
         let rules = vec![make_rule(
@@ -2353,8 +2439,10 @@ mod tests {
     #[test]
     fn test_nested_compound_in_negation() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("player", vec![atom_const("alice")]));
-        db.insert(make_atom("player", vec![atom_const("bob")]));
+        db.insert(make_atom("player", vec![atom_const("alice")]))
+            .unwrap();
+        db.insert(make_atom("player", vec![atom_const("bob")]))
+            .unwrap();
         db.insert(make_atom(
             "has_item",
             vec![
@@ -2367,7 +2455,8 @@ mod tests {
                     ],
                 ),
             ],
-        ));
+        ))
+        .unwrap();
 
         // First, derive who has weapons
         // has_weapon(P) :- has_item(P, item(weapon, stats(D, W))).
@@ -2421,7 +2510,8 @@ mod tests {
             deep_term = Term::Compound(Intern::new("nest".to_string()), vec![deep_term]);
         }
 
-        db.insert(make_atom("deep", vec![deep_term.clone()]));
+        db.insert(make_atom("deep", vec![deep_term.clone()]))
+            .unwrap();
 
         // Query for it
         let query = make_atom("deep", vec![var("X")]);
@@ -2440,7 +2530,8 @@ mod tests {
         let mut db = FactDatabase::new();
 
         // wrapper(wrap(X)) :- value(X).
-        db.insert(make_atom("value", vec![atom_const("a")]));
+        db.insert(make_atom("value", vec![atom_const("a")]))
+            .unwrap();
 
         let mut rules = Vec::new();
         // Create rules that progressively wrap the value
@@ -2490,7 +2581,8 @@ mod tests {
         for i in 0..100 {
             let from = format!("n{}", i);
             let to = format!("n{}", i + 1);
-            db.insert(make_atom("edge", vec![atom_const(&from), atom_const(&to)]));
+            db.insert(make_atom("edge", vec![atom_const(&from), atom_const(&to)]))
+                .unwrap();
         }
 
         // path(X, Y) :- edge(X, Y).
@@ -2542,7 +2634,8 @@ mod tests {
         for i in 0..50 {
             let from = format!("n{}", i);
             let to = format!("n{}", i + 1);
-            db.insert(make_atom("edge", vec![atom_const(&from), atom_const(&to)]));
+            db.insert(make_atom("edge", vec![atom_const(&from), atom_const(&to)]))
+                .unwrap();
         }
 
         let rules = vec![

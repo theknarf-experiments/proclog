@@ -628,7 +628,8 @@ mod tests {
         db.insert(make_atom(
             "parent",
             vec![atom_const("john"), atom_const("mary")],
-        ));
+        ))
+        .unwrap();
 
         // Rule: ancestor(john, mary) :- parent(john, mary).
         let rule = make_rule(
@@ -650,11 +651,13 @@ mod tests {
         db.insert(make_atom(
             "parent",
             vec![atom_const("john"), atom_const("mary")],
-        ));
+        ))
+        .unwrap();
         db.insert(make_atom(
             "parent",
             vec![atom_const("john"), atom_const("bob")],
-        ));
+        ))
+        .unwrap();
 
         // Rule: child(X) :- parent(john, X).
         let rule = make_rule(
@@ -681,11 +684,13 @@ mod tests {
         db.insert(make_atom(
             "parent",
             vec![atom_const("john"), atom_const("mary")],
-        ));
+        ))
+        .unwrap();
         db.insert(make_atom(
             "parent",
             vec![atom_const("bob"), atom_const("alice")],
-        ));
+        ))
+        .unwrap();
 
         // Rule: ancestor(X, Y) :- parent(X, Y).
         let rule = make_rule(
@@ -706,15 +711,18 @@ mod tests {
         db.insert(make_atom(
             "parent",
             vec![atom_const("john"), atom_const("mary")],
-        ));
+        ))
+        .unwrap();
         db.insert(make_atom(
             "parent",
             vec![atom_const("mary"), atom_const("alice")],
-        ));
+        ))
+        .unwrap();
         db.insert(make_atom(
             "parent",
             vec![atom_const("bob"), atom_const("charlie")],
-        ));
+        ))
+        .unwrap();
 
         // Rule: grandparent(X, Z) :- parent(X, Y), parent(Y, Z).
         let rule = make_rule(
@@ -736,9 +744,12 @@ mod tests {
     #[test]
     fn test_ground_rule_multiple_chains() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("parent", vec![atom_const("a"), atom_const("b")]));
-        db.insert(make_atom("parent", vec![atom_const("b"), atom_const("c")]));
-        db.insert(make_atom("parent", vec![atom_const("b"), atom_const("d")]));
+        db.insert(make_atom("parent", vec![atom_const("a"), atom_const("b")]))
+            .unwrap();
+        db.insert(make_atom("parent", vec![atom_const("b"), atom_const("c")]))
+            .unwrap();
+        db.insert(make_atom("parent", vec![atom_const("b"), atom_const("d")]))
+            .unwrap();
 
         // Rule: grandparent(X, Z) :- parent(X, Y), parent(Y, Z).
         let rule = make_rule(
@@ -761,7 +772,8 @@ mod tests {
         db.insert(make_atom(
             "parent",
             vec![atom_const("john"), atom_const("mary")],
-        ));
+        ))
+        .unwrap();
 
         // Rule: child(X) :- parent(alice, X).
         // No facts match parent(alice, X)
@@ -793,9 +805,12 @@ mod tests {
     #[test]
     fn test_ground_rule_three_literals() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("edge", vec![atom_const("a"), atom_const("b")]));
-        db.insert(make_atom("edge", vec![atom_const("b"), atom_const("c")]));
-        db.insert(make_atom("edge", vec![atom_const("c"), atom_const("d")]));
+        db.insert(make_atom("edge", vec![atom_const("a"), atom_const("b")]))
+            .unwrap();
+        db.insert(make_atom("edge", vec![atom_const("b"), atom_const("c")]))
+            .unwrap();
+        db.insert(make_atom("edge", vec![atom_const("c"), atom_const("d")]))
+            .unwrap();
 
         // Rule: path3(X, W) :- edge(X, Y), edge(Y, Z), edge(Z, W).
         let rule = make_rule(
@@ -820,9 +835,12 @@ mod tests {
     #[test]
     fn test_ground_rule_simple_negation() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("bird", vec![atom_const("tweety")]));
-        db.insert(make_atom("bird", vec![atom_const("polly")]));
-        db.insert(make_atom("penguin", vec![atom_const("polly")]));
+        db.insert(make_atom("bird", vec![atom_const("tweety")]))
+            .unwrap();
+        db.insert(make_atom("bird", vec![atom_const("polly")]))
+            .unwrap();
+        db.insert(make_atom("penguin", vec![atom_const("polly")]))
+            .unwrap();
 
         // Rule: flies(X) :- bird(X), not penguin(X).
         let rule = make_rule(
@@ -843,7 +861,8 @@ mod tests {
     #[test]
     fn test_ground_rule_negation_no_match() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("bird", vec![atom_const("tweety")]));
+        db.insert(make_atom("bird", vec![atom_const("tweety")]))
+            .unwrap();
 
         // Rule: mammal(X) :- not bird(X).
         // Since only tweety exists and is a bird, no mammals
@@ -862,7 +881,8 @@ mod tests {
     #[test]
     fn test_ground_rule_negation_with_ground_term() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("bird", vec![atom_const("tweety")]));
+        db.insert(make_atom("bird", vec![atom_const("tweety")]))
+            .unwrap();
 
         // Rule: not_bird_polly :- not bird(polly).
         let rule = make_rule(
@@ -882,9 +902,9 @@ mod tests {
     #[test]
     fn test_ground_rule_multiple_negations() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("a", vec![atom_const("x")]));
-        db.insert(make_atom("b", vec![atom_const("y")]));
-        db.insert(make_atom("c", vec![atom_const("z")]));
+        db.insert(make_atom("a", vec![atom_const("x")])).unwrap();
+        db.insert(make_atom("b", vec![atom_const("y")])).unwrap();
+        db.insert(make_atom("c", vec![atom_const("z")])).unwrap();
 
         // Rule: result :- not a(y), not b(x), not c(w).
         let rule = make_rule(
@@ -929,7 +949,7 @@ mod tests {
         for statement in program.statements {
             match statement {
                 Statement::Fact(fact) => {
-                    db.insert(fact.atom);
+                    db.insert(fact.atom).unwrap();
                 }
                 Statement::Rule(rule) => {
                     rules.push(rule);
@@ -953,7 +973,7 @@ mod tests {
 
         // Step 4: Add derived facts to database
         for fact in derived_facts {
-            db.insert(fact);
+            db.insert(fact).unwrap();
         }
 
         // Step 5: Query for grandparents
@@ -1064,8 +1084,8 @@ mod tests {
     #[test]
     fn test_ground_choice_element_with_condition() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("item", vec![atom_const("a")]));
-        db.insert(make_atom("item", vec![atom_const("b")]));
+        db.insert(make_atom("item", vec![atom_const("a")])).unwrap();
+        db.insert(make_atom("item", vec![atom_const("b")])).unwrap();
 
         let const_env = ConstantEnv::new();
 
@@ -1243,7 +1263,7 @@ mod tests {
     #[test]
     fn test_ground_choice_element_empty_condition_result() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("item", vec![atom_const("a")]));
+        db.insert(make_atom("item", vec![atom_const("a")])).unwrap();
 
         let const_env = ConstantEnv::new();
 
@@ -1261,10 +1281,11 @@ mod tests {
     #[test]
     fn test_ground_choice_element_multiple_conditions() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("item", vec![atom_const("a")]));
-        db.insert(make_atom("item", vec![atom_const("b")]));
-        db.insert(make_atom("valid", vec![atom_const("a")]));
-        db.insert(make_atom("safe", vec![atom_const("a")]));
+        db.insert(make_atom("item", vec![atom_const("a")])).unwrap();
+        db.insert(make_atom("item", vec![atom_const("b")])).unwrap();
+        db.insert(make_atom("valid", vec![atom_const("a")]))
+            .unwrap();
+        db.insert(make_atom("safe", vec![atom_const("a")])).unwrap();
 
         let const_env = ConstantEnv::new();
 
@@ -1287,9 +1308,12 @@ mod tests {
     #[test]
     fn test_ground_choice_rule_with_body_variables() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("room", vec![atom_const("r1")]));
-        db.insert(make_atom("item", vec![atom_const("sword")]));
-        db.insert(make_atom("item", vec![atom_const("shield")]));
+        db.insert(make_atom("room", vec![atom_const("r1")]))
+            .unwrap();
+        db.insert(make_atom("item", vec![atom_const("sword")]))
+            .unwrap();
+        db.insert(make_atom("item", vec![atom_const("shield")]))
+            .unwrap();
 
         let const_env = ConstantEnv::new();
 
@@ -1312,7 +1336,7 @@ mod tests {
     #[test]
     fn test_ground_choice_rule_empty_body() {
         let mut db = FactDatabase::new();
-        db.insert(make_atom("item", vec![atom_const("a")]));
+        db.insert(make_atom("item", vec![atom_const("a")])).unwrap();
 
         let const_env = ConstantEnv::new();
 
@@ -1335,8 +1359,10 @@ mod tests {
     fn test_satisfy_body_with_builtin_comparison() {
         // Test: number(X), X > 5 with number(7) in the database
         let mut db = FactDatabase::new();
-        db.insert(make_atom("number", vec![Term::Constant(Value::Integer(7))]));
-        db.insert(make_atom("number", vec![Term::Constant(Value::Integer(3))]));
+        db.insert(make_atom("number", vec![Term::Constant(Value::Integer(7))]))
+            .unwrap();
+        db.insert(make_atom("number", vec![Term::Constant(Value::Integer(3))]))
+            .unwrap();
 
         let body = vec![
             Literal::Positive(make_atom("number", vec![var("X")])),
@@ -1369,8 +1395,10 @@ mod tests {
     fn test_ground_rule_with_builtin_comparison() {
         // Test: large(X) :- number(X), X > 5
         let mut db = FactDatabase::new();
-        db.insert(make_atom("number", vec![Term::Constant(Value::Integer(7))]));
-        db.insert(make_atom("number", vec![Term::Constant(Value::Integer(3))]));
+        db.insert(make_atom("number", vec![Term::Constant(Value::Integer(7))]))
+            .unwrap();
+        db.insert(make_atom("number", vec![Term::Constant(Value::Integer(3))]))
+            .unwrap();
 
         let rule = Rule {
             head: make_atom("large", vec![var("X")]),
@@ -1406,8 +1434,8 @@ mod tests {
         // Choice rule with no body: { selected(X) : item(X) }.
         // Should return ONE group containing all grounded atoms
         let mut db = FactDatabase::new();
-        db.insert(make_atom("item", vec![atom_const("a")]));
-        db.insert(make_atom("item", vec![atom_const("b")]));
+        db.insert(make_atom("item", vec![atom_const("a")])).unwrap();
+        db.insert(make_atom("item", vec![atom_const("b")])).unwrap();
 
         let const_env = ConstantEnv::new();
 
@@ -1434,10 +1462,14 @@ mod tests {
         // Choice rule with body: 1 { has_weapon(P, W) : weapon(W) } 1 :- player(P).
         // Should return TWO groups (one per player)
         let mut db = FactDatabase::new();
-        db.insert(make_atom("player", vec![atom_const("alice")]));
-        db.insert(make_atom("player", vec![atom_const("bob")]));
-        db.insert(make_atom("weapon", vec![atom_const("sword")]));
-        db.insert(make_atom("weapon", vec![atom_const("bow")]));
+        db.insert(make_atom("player", vec![atom_const("alice")]))
+            .unwrap();
+        db.insert(make_atom("player", vec![atom_const("bob")]))
+            .unwrap();
+        db.insert(make_atom("weapon", vec![atom_const("sword")]))
+            .unwrap();
+        db.insert(make_atom("weapon", vec![atom_const("bow")]))
+            .unwrap();
 
         let const_env = ConstantEnv::new();
 
@@ -1467,8 +1499,8 @@ mod tests {
         // NEW FUNCTION: ground_choice_rule_split
         // With no body, should return single group
         let mut db = FactDatabase::new();
-        db.insert(make_atom("item", vec![atom_const("a")]));
-        db.insert(make_atom("item", vec![atom_const("b")]));
+        db.insert(make_atom("item", vec![atom_const("a")])).unwrap();
+        db.insert(make_atom("item", vec![atom_const("b")])).unwrap();
 
         let const_env = ConstantEnv::new();
 
@@ -1501,10 +1533,14 @@ mod tests {
         // NEW FUNCTION: ground_choice_rule_split
         // With body that grounds to 2 substitutions, should return 2 groups
         let mut db = FactDatabase::new();
-        db.insert(make_atom("player", vec![atom_const("alice")]));
-        db.insert(make_atom("player", vec![atom_const("bob")]));
-        db.insert(make_atom("weapon", vec![atom_const("sword")]));
-        db.insert(make_atom("weapon", vec![atom_const("bow")]));
+        db.insert(make_atom("player", vec![atom_const("alice")]))
+            .unwrap();
+        db.insert(make_atom("player", vec![atom_const("bob")]))
+            .unwrap();
+        db.insert(make_atom("weapon", vec![atom_const("sword")]))
+            .unwrap();
+        db.insert(make_atom("weapon", vec![atom_const("bow")]))
+            .unwrap();
 
         let const_env = ConstantEnv::new();
 

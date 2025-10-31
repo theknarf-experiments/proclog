@@ -114,7 +114,7 @@ mod tests {
         // Setup database
         let mut db = FactDatabase::new();
         let fact = make_atom("parent", vec![atom_term("john"), atom_term("mary")]);
-        db.insert(fact.clone());
+        db.insert(fact.clone()).unwrap();
 
         // Query: ?- parent(john, mary).
         let query = Query {
@@ -132,7 +132,8 @@ mod tests {
         db.insert(make_atom(
             "parent",
             vec![atom_term("john"), atom_term("mary")],
-        ));
+        ))
+        .unwrap();
 
         // Query: ?- parent(alice, bob). (not in database)
         let query = Query {
@@ -153,15 +154,18 @@ mod tests {
         db.insert(make_atom(
             "parent",
             vec![atom_term("john"), atom_term("mary")],
-        ));
+        ))
+        .unwrap();
         db.insert(make_atom(
             "parent",
             vec![atom_term("alice"), atom_term("mary")],
-        ));
+        ))
+        .unwrap();
         db.insert(make_atom(
             "parent",
             vec![atom_term("bob"), atom_term("sue")],
-        ));
+        ))
+        .unwrap();
 
         // Query: ?- parent(X, mary).
         let query = Query {
@@ -201,11 +205,13 @@ mod tests {
         db.insert(make_atom(
             "parent",
             vec![atom_term("john"), atom_term("mary")],
-        ));
+        ))
+        .unwrap();
         db.insert(make_atom(
             "parent",
             vec![atom_term("alice"), atom_term("bob")],
-        ));
+        ))
+        .unwrap();
 
         // Query: ?- parent(X, Y).
         let query = Query {
@@ -226,11 +232,13 @@ mod tests {
         db.insert(make_atom(
             "parent",
             vec![atom_term("john"), atom_term("mary")],
-        ));
+        ))
+        .unwrap();
         db.insert(make_atom(
             "parent",
             vec![atom_term("mary"), atom_term("sue")],
-        ));
+        ))
+        .unwrap();
 
         // Query: ?- parent(X, Y), parent(Y, Z).
         // Should find: X=john, Y=mary, Z=sue
@@ -249,9 +257,12 @@ mod tests {
     fn test_query_with_negation() {
         // Setup database
         let mut db = FactDatabase::new();
-        db.insert(make_atom("person", vec![atom_term("john")]));
-        db.insert(make_atom("person", vec![atom_term("mary")]));
-        db.insert(make_atom("dead", vec![atom_term("john")]));
+        db.insert(make_atom("person", vec![atom_term("john")]))
+            .unwrap();
+        db.insert(make_atom("person", vec![atom_term("mary")]))
+            .unwrap();
+        db.insert(make_atom("dead", vec![atom_term("john")]))
+            .unwrap();
 
         // Query: ?- person(X), not dead(X).
         // Should find only mary

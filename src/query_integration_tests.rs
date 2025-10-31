@@ -32,7 +32,7 @@ mod query_integration_tests {
         for statement in &program.statements {
             match statement {
                 crate::ast::Statement::Fact(fact) => {
-                    facts.insert(fact.atom.clone());
+                    facts.insert(fact.atom.clone()).unwrap();
                 }
                 crate::ast::Statement::Rule(rule) => {
                     rules.push(rule.clone());
@@ -96,7 +96,7 @@ mod query_integration_tests {
         for statement in &program.statements {
             match statement {
                 crate::ast::Statement::Fact(fact) => {
-                    facts.insert(fact.atom.clone());
+                    facts.insert(fact.atom.clone()).unwrap();
                 }
                 crate::ast::Statement::Rule(rule) => {
                     rules.push(rule.clone());
@@ -131,7 +131,7 @@ mod query_integration_tests {
         let mut facts = crate::database::FactDatabase::new();
         for statement in &program.statements {
             if let crate::ast::Statement::Fact(fact) = statement {
-                facts.insert(fact.atom.clone());
+                facts.insert(fact.atom.clone()).unwrap();
             }
         }
 
@@ -166,7 +166,7 @@ mod query_integration_tests {
         let mut facts = crate::database::FactDatabase::new();
         for statement in &program.statements {
             if let crate::ast::Statement::Fact(fact) = statement {
-                facts.insert(fact.atom.clone());
+                facts.insert(fact.atom.clone()).unwrap();
             }
         }
 
@@ -197,7 +197,7 @@ mod query_integration_tests {
         for statement in &program.statements {
             match statement {
                 crate::ast::Statement::Fact(fact) => {
-                    facts.insert(fact.atom.clone());
+                    facts.insert(fact.atom.clone()).unwrap();
                 }
                 crate::ast::Statement::Rule(rule) => {
                     rules.push(rule.clone());
@@ -241,7 +241,7 @@ mod query_integration_tests {
         for statement in &program.statements {
             match statement {
                 crate::ast::Statement::Fact(fact) => {
-                    facts.insert(fact.atom.clone());
+                    facts.insert(fact.atom.clone()).unwrap();
                 }
                 crate::ast::Statement::Rule(rule) => {
                     rules.push(rule.clone());
@@ -285,7 +285,7 @@ mod query_integration_tests {
         for statement in &program.statements {
             if let crate::ast::Statement::Fact(fact) = statement {
                 let substituted = const_env.substitute_atom(&fact.atom);
-                facts.insert(substituted);
+                facts.insert(substituted).unwrap();
             }
         }
 
@@ -318,7 +318,7 @@ mod query_integration_tests {
         for statement in &program.statements {
             if let crate::ast::Statement::Fact(fact) = statement {
                 let substituted = const_env.substitute_atom(&fact.atom);
-                facts.insert(substituted);
+                facts.insert(substituted).unwrap();
             }
         }
 
@@ -351,7 +351,7 @@ mod query_integration_tests {
         for statement in &program.statements {
             if let crate::ast::Statement::Fact(fact) = statement {
                 let substituted = const_env.substitute_atom(&fact.atom);
-                facts.insert(substituted);
+                facts.insert(substituted).unwrap();
             }
         }
 
@@ -389,7 +389,7 @@ mod query_integration_tests {
         for statement in &program.statements {
             if let crate::ast::Statement::Fact(fact) = statement {
                 let substituted = const_env.substitute_atom(&fact.atom);
-                facts.insert(substituted);
+                facts.insert(substituted).unwrap();
             }
         }
 
@@ -422,7 +422,7 @@ mod query_integration_tests {
         for statement in &program.statements {
             if let crate::ast::Statement::Fact(fact) = statement {
                 let substituted = const_env.substitute_atom(&fact.atom);
-                facts.insert(substituted);
+                facts.insert(substituted).unwrap();
             }
         }
 
@@ -456,7 +456,7 @@ mod query_integration_tests {
         for statement in &program.statements {
             if let crate::ast::Statement::Fact(fact) = statement {
                 let substituted = const_env.substitute_atom(&fact.atom);
-                facts.insert(substituted);
+                facts.insert(substituted).unwrap();
             }
         }
 
@@ -508,7 +508,7 @@ mod query_integration_tests {
             match statement {
                 crate::ast::Statement::Fact(fact) => {
                     let substituted = const_env.substitute_atom(&fact.atom);
-                    facts.insert(substituted);
+                    facts.insert(substituted).unwrap();
                 }
                 crate::ast::Statement::Rule(rule) => {
                     let substituted_head = const_env.substitute_atom(&rule.head);
@@ -570,7 +570,7 @@ mod query_integration_tests {
             match statement {
                 crate::ast::Statement::Fact(fact) => {
                     let substituted = const_env.substitute_atom(&fact.atom);
-                    facts.insert(substituted);
+                    facts.insert(substituted).unwrap();
                 }
                 crate::ast::Statement::Rule(rule) => {
                     // Substitute constants in rule
