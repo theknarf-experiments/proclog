@@ -143,11 +143,24 @@ pub fn run_test_block(base_statements: &[Statement], test_block: &TestBlock) -> 
                 })
                 .collect();
 
+            let substituted_body: Vec<_> = choice
+                .body
+                .iter()
+                .map(|lit| match lit {
+                    Literal::Positive(atom) => {
+                        Literal::Positive(const_env.substitute_atom(atom))
+                    }
+                    Literal::Negative(atom) => {
+                        Literal::Negative(const_env.substitute_atom(atom))
+                    }
+                })
+                .collect();
+
             choice_rules.push(ChoiceRule {
                 lower_bound: substituted_lower,
                 upper_bound: substituted_upper,
                 elements: substituted_elements,
-                body: choice.body.clone(), // Body conditions are not substituted as they reference variables
+                body: substituted_body,
             });
             has_asp_statements = true;
         }
@@ -1004,6 +1017,37 @@ mod tests {
             result.case_results
         );
         assert_eq!(result.passed_cases, test_block.test_cases.len());
+    }
+
+    #[test]
+    fn test_choice_rule_body_constant_substitution() {
+        let input = r#"
+            #test "choice body constants" {
+                #const chosen = hero.
+
+                available(hero).
+                trigger(chosen).
+
+                1 { select(X) : available(X) } 1 :- trigger(chosen).
+
+                ?- select(hero).
+                + true.
+            }
+        "#;
+
+        let program = parse_program(input).expect("Parse failed");
+        let test_block = match &program.statements[0] {
+            Statement::Test(tb) => tb,
+            _ => panic!("Expected test block"),
+        };
+
+        let result = run_test_block(&[], test_block);
+        assert!(
+            result.passed,
+            "Choice rule body constants should be substituted: {:?}",
+            result.case_results
+        );
+        assert_eq!(result.passed_cases, 1);
     }
 
     #[test]
