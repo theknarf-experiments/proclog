@@ -6,16 +6,17 @@
 use internment::Intern;
 use proclog::asp::{asp_evaluation, AnswerSet};
 use proclog::ast::{
-    Atom, ChoiceElement, ChoiceRule, Constraint, Literal, Rule, Statement, Symbol, Term,
-    TestBlock, TestCase, Value,
+    Atom, ChoiceElement, ChoiceRule, Constraint, Literal, Rule, Statement, Symbol, Term, TestBlock,
+    TestCase, Value,
 };
 use proclog::builtins;
 use proclog::constants::ConstantEnv;
 use proclog::database::{FactDatabase, InsertError};
 use proclog::evaluation::{stratified_evaluation_with_constraints, EvaluationError};
+use proclog::grounding::{ground_rule, satisfy_body};
 use proclog::query::evaluate_query;
 use proclog::unification::{unify_atoms, Substitution};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Result of running a single test case
 #[derive(Debug, Clone)]
@@ -106,10 +107,7 @@ fn substitute_choice_rule(const_env: &ConstantEnv, choice_rule: &ChoiceRule) -> 
     }
 }
 
-fn substitute_choice_element(
-    const_env: &ConstantEnv,
-    element: &ChoiceElement,
-) -> ChoiceElement {
+fn substitute_choice_element(const_env: &ConstantEnv, element: &ChoiceElement) -> ChoiceElement {
     ChoiceElement {
         atom: const_env.substitute_atom(&element.atom),
         condition: substitute_literals(const_env, &element.condition),
@@ -431,157 +429,217 @@ fn evaluate_query_with_rules(
     db: &FactDatabase,
     rules: &[Rule],
 ) -> Vec<Substitution> {
+    let relevant_rules = collect_relevant_rules(query, rules);
+
+    if relevant_rules.is_empty() {
+        return Vec::new();
+    }
+
+    let mut augmented_db = db.clone();
     let mut visited = HashSet::new();
-    let mut gensym = 0usize;
-    satisfy_with_rules(&query.body, db, rules, &mut visited, &mut gensym)
-}
 
-/// Recursively satisfy literals using available facts and rules
-fn satisfy_with_rules(
-    literals: &[Literal],
-    db: &FactDatabase,
-    rules: &[Rule],
-    visited: &mut HashSet<Atom>,
-    gensym: &mut usize,
-) -> Vec<Substitution> {
-    if literals.is_empty() {
-        return vec![Substitution::new()];
-    }
-
-    let first = &literals[0];
-    let rest = &literals[1..];
-
-    match first {
-        Literal::Positive(atom) => {
-            if let Some(builtin) = builtins::parse_builtin(atom) {
-                let mut result = Vec::new();
-
-                if rest.is_empty() {
-                    let empty = Substitution::new();
-                    if matches!(evaluate_builtin_with_subst(&empty, &builtin), Some(true)) {
-                        result.push(empty);
-                    }
-                } else {
-                    let rest_substs = satisfy_with_rules(rest, db, rules, visited, gensym);
-                    for subst in rest_substs {
-                        if matches!(evaluate_builtin_with_subst(&subst, &builtin), Some(true)) {
-                            result.push(subst);
-                        }
-                    }
-                }
-
-                return result;
+    for literal in &query.body {
+        if let Literal::Positive(atom) = literal {
+            if builtins::parse_builtin(atom).is_none() {
+                derive_specialized_rule_facts(
+                    atom,
+                    &relevant_rules,
+                    &mut augmented_db,
+                    &mut visited,
+                );
             }
-
-            let guard_atom = canonicalize_atom(atom);
-            if !visited.insert(guard_atom.clone()) {
-                return Vec::new();
-            }
-
-            let mut results = Vec::new();
-
-            // Matches provided by existing facts
-            let fact_matches = db.query(atom);
-            results.extend(extend_with_rest(
-                fact_matches,
-                rest,
-                db,
-                rules,
-                visited,
-                gensym,
-            ));
-
-            // Matches provided via rules
-            for rule in rules.iter().filter(|r| r.head.predicate == atom.predicate) {
-                let fresh_rule = freshen_rule(rule, gensym);
-
-                let mut head_subst = Substitution::new();
-                if unify_atoms(&fresh_rule.head, atom, &mut head_subst) {
-                    let rule_body: Vec<Literal> = fresh_rule
-                        .body
-                        .iter()
-                        .map(|lit| apply_subst_to_literal(&head_subst, lit))
-                        .collect();
-
-                    let body_substs = satisfy_with_rules(&rule_body, db, rules, visited, gensym);
-                    let combined_substs: Vec<Substitution> = body_substs
-                        .into_iter()
-                        .map(|body_subst| combine_substitutions(&head_subst, &body_subst))
-                        .collect();
-
-                    results.extend(extend_with_rest(
-                        combined_substs,
-                        rest,
-                        db,
-                        rules,
-                        visited,
-                        gensym,
-                    ));
-                }
-            }
-
-            visited.remove(&guard_atom);
-            results
-        }
-        Literal::Negative(atom) => {
-            let rest_substs = satisfy_with_rules(rest, db, rules, visited, gensym);
-            rest_substs
-                .into_iter()
-                .filter(|subst| {
-                    let grounded = subst.apply_atom(atom);
-                    satisfy_with_rules(&[Literal::Positive(grounded)], db, rules, visited, gensym)
-                        .is_empty()
-                })
-                .collect()
         }
     }
+
+    evaluate_query(query, &augmented_db)
 }
 
-/// Extend substitutions by satisfying the remaining literals
-fn extend_with_rest(
-    matches: Vec<Substitution>,
-    rest: &[Literal],
-    db: &FactDatabase,
+fn derive_specialized_rule_facts(
+    atom: &Atom,
     rules: &[Rule],
+    db: &mut FactDatabase,
     visited: &mut HashSet<Atom>,
-    gensym: &mut usize,
-) -> Vec<Substitution> {
-    if rest.is_empty() {
-        return matches;
+) {
+    let canonical = canonicalize_atom(atom);
+    if !visited.insert(canonical) {
+        return;
     }
 
-    let mut combined = Vec::new();
+    for rule in rules.iter().filter(|r| r.head.predicate == atom.predicate) {
+        let mut head_subst = Substitution::new();
 
-    for subst in matches {
-        let applied_rest: Vec<Literal> = rest
+        if !unify_atoms(&rule.head, atom, &mut head_subst) {
+            continue;
+        }
+
+        let specialized_head = head_subst.apply_atom(&rule.head);
+        let specialized_body: Vec<Literal> = rule
+            .body
             .iter()
-            .map(|lit| apply_subst_to_literal(&subst, lit))
+            .map(|literal| match literal {
+                Literal::Positive(inner) => Literal::Positive(head_subst.apply_atom(inner)),
+                Literal::Negative(inner) => Literal::Negative(head_subst.apply_atom(inner)),
+            })
             .collect();
-        let rest_substs = satisfy_with_rules(&applied_rest, db, rules, visited, gensym);
-        for rest_subst in rest_substs {
-            combined.push(combine_substitutions(&subst, &rest_subst));
+
+        for body_literal in &specialized_body {
+            if let Literal::Positive(body_atom) = body_literal {
+                if builtins::parse_builtin(body_atom).is_none() {
+                    derive_specialized_rule_facts(body_atom, rules, db, visited);
+                }
+            }
+        }
+
+        let specialized_rule = Rule {
+            head: specialized_head.clone(),
+            body: specialized_body.clone(),
+        };
+
+        for fact in ground_rule(&specialized_rule, db) {
+            let _ = db.insert(fact);
+        }
+
+        handle_equality_builtins(&specialized_head, &specialized_body, db);
+    }
+}
+
+fn canonicalize_atom(atom: &Atom) -> Atom {
+    let mut mapping = HashMap::new();
+    Atom {
+        predicate: atom.predicate.clone(),
+        terms: atom
+            .terms
+            .iter()
+            .map(|term| canonicalize_term(term, &mut mapping))
+            .collect(),
+    }
+}
+
+fn canonicalize_term(term: &Term, mapping: &mut HashMap<Symbol, Symbol>) -> Term {
+    match term {
+        Term::Variable(var) => {
+            let symbol = if let Some(existing) = mapping.get(var) {
+                existing.clone()
+            } else {
+                let name = format!("_G{}", mapping.len());
+                let interned = Intern::new(name);
+                mapping.insert(var.clone(), interned.clone());
+                interned
+            };
+            Term::Variable(symbol)
+        }
+        Term::Compound(functor, args) => Term::Compound(
+            functor.clone(),
+            args.iter()
+                .map(|arg| canonicalize_term(arg, mapping))
+                .collect(),
+        ),
+        Term::Range(start, end) => Term::Range(
+            Box::new(canonicalize_term(start, mapping)),
+            Box::new(canonicalize_term(end, mapping)),
+        ),
+        Term::Constant(_) => term.clone(),
+    }
+}
+
+fn handle_equality_builtins(head: &Atom, body: &[Literal], db: &mut FactDatabase) {
+    if !body.iter().any(is_equality_builtin_literal) {
+        return;
+    }
+
+    let (filtered_body, equality_literals): (Vec<Literal>, Vec<Literal>) = body
+        .iter()
+        .cloned()
+        .partition(|literal| !is_equality_builtin_literal(literal));
+
+    let substitutions = satisfy_body(&filtered_body, db);
+
+    for subst in substitutions {
+        if equality_literals
+            .iter()
+            .all(|literal| builtin_holds(&subst, literal))
+        {
+            let head_atom = subst.apply_atom(head);
+            let _ = db.insert(head_atom);
+        }
+    }
+}
+
+fn is_equality_builtin_literal(literal: &Literal) -> bool {
+    match literal {
+        Literal::Positive(atom) => match builtins::parse_builtin(atom) {
+            Some(builtins::BuiltIn::Comparison(builtins::CompOp::Eq, _, _))
+            | Some(builtins::BuiltIn::Comparison(builtins::CompOp::Neq, _, _)) => true,
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+fn builtin_holds(subst: &Substitution, literal: &Literal) -> bool {
+    let atom = match literal {
+        Literal::Positive(atom) => atom,
+        Literal::Negative(_) => return false,
+    };
+
+    let builtin = match builtins::parse_builtin(atom) {
+        Some(builtin) => builtin,
+        None => return true,
+    };
+
+    let applied = match builtin {
+        builtins::BuiltIn::Comparison(op, left, right) => {
+            builtins::BuiltIn::Comparison(op.clone(), subst.apply(&left), subst.apply(&right))
+        }
+        other => other,
+    };
+
+    match builtins::eval_builtin(&applied, subst) {
+        Some(result) => result,
+        None => match applied {
+            builtins::BuiltIn::Comparison(builtins::CompOp::Eq, ref left, ref right) => {
+                left == right
+            }
+            builtins::BuiltIn::Comparison(builtins::CompOp::Neq, ref left, ref right) => {
+                left != right
+            }
+            _ => false,
+        },
+    }
+}
+
+fn collect_relevant_rules(query: &proclog::ast::Query, rules: &[Rule]) -> Vec<Rule> {
+    let mut queue = VecDeque::new();
+    let mut seen = HashSet::new();
+    let mut collected = Vec::new();
+
+    for literal in &query.body {
+        if let Literal::Positive(atom) = literal {
+            if builtins::parse_builtin(atom).is_none() {
+                queue.push_back(atom.predicate.clone());
+            }
         }
     }
 
-    combined
-}
+    while let Some(predicate) = queue.pop_front() {
+        if !seen.insert(predicate.clone()) {
+            continue;
+        }
 
-/// Apply substitution to a literal
-fn apply_subst_to_literal(subst: &Substitution, literal: &Literal) -> Literal {
-    match literal {
-        Literal::Positive(atom) => Literal::Positive(subst.apply_atom(atom)),
-        Literal::Negative(atom) => Literal::Negative(subst.apply_atom(atom)),
-    }
-}
+        for rule in rules.iter().filter(|r| r.head.predicate == predicate) {
+            collected.push(rule.clone());
 
-/// Combine two substitutions, applying the first to the second's bindings
-fn combine_substitutions(first: &Substitution, second: &Substitution) -> Substitution {
-    let mut combined = first.clone();
-    for (var, term) in second.iter() {
-        let applied = first.apply(term);
-        combined.bind(var.clone(), applied);
+            for body_literal in &rule.body {
+                if let Literal::Positive(body_atom) = body_literal {
+                    if builtins::parse_builtin(body_atom).is_none() {
+                        queue.push_back(body_atom.predicate.clone());
+                    }
+                }
+            }
+        }
     }
-    combined
+
+    collected
 }
 
 fn should_use_rule_fallback(query: &proclog::ast::Query, rules: &[Rule]) -> bool {
@@ -619,138 +677,6 @@ fn rule_is_recursive(rule: &Rule) -> bool {
     })
 }
 
-/// Create a fresh copy of a rule with uniquely named variables
-fn freshen_rule(rule: &Rule, gensym: &mut usize) -> Rule {
-    let mut mapping = HashMap::new();
-    Rule {
-        head: freshen_atom(&rule.head, &mut mapping, gensym),
-        body: rule
-            .body
-            .iter()
-            .map(|lit| freshen_literal(lit, &mut mapping, gensym))
-            .collect(),
-    }
-}
-
-fn freshen_literal(
-    literal: &Literal,
-    mapping: &mut HashMap<Symbol, Symbol>,
-    gensym: &mut usize,
-) -> Literal {
-    match literal {
-        Literal::Positive(atom) => Literal::Positive(freshen_atom(atom, mapping, gensym)),
-        Literal::Negative(atom) => Literal::Negative(freshen_atom(atom, mapping, gensym)),
-    }
-}
-
-fn freshen_atom(atom: &Atom, mapping: &mut HashMap<Symbol, Symbol>, gensym: &mut usize) -> Atom {
-    Atom {
-        predicate: atom.predicate.clone(),
-        terms: atom
-            .terms
-            .iter()
-            .map(|term| freshen_term(term, mapping, gensym))
-            .collect(),
-    }
-}
-
-fn freshen_term(term: &Term, mapping: &mut HashMap<Symbol, Symbol>, gensym: &mut usize) -> Term {
-    match term {
-        Term::Variable(var) => {
-            if var.as_ref() == "_" {
-                let name = format!("_G{}", *gensym);
-                *gensym += 1;
-                Term::Variable(Intern::new(name))
-            } else {
-                let entry = mapping.entry(var.clone()).or_insert_with(|| {
-                    let name = format!("_G{}", *gensym);
-                    *gensym += 1;
-                    Intern::new(name)
-                });
-                Term::Variable(entry.clone())
-            }
-        }
-        Term::Constant(_) => term.clone(),
-        Term::Compound(functor, args) => Term::Compound(
-            functor.clone(),
-            args.iter()
-                .map(|arg| freshen_term(arg, mapping, gensym))
-                .collect(),
-        ),
-        Term::Range(start, end) => Term::Range(
-            Box::new(freshen_term(start, mapping, gensym)),
-            Box::new(freshen_term(end, mapping, gensym)),
-        ),
-    }
-}
-
-fn canonicalize_atom(atom: &Atom) -> Atom {
-    let mut mapping = HashMap::new();
-    let mut counter = 0usize;
-    Atom {
-        predicate: atom.predicate.clone(),
-        terms: atom
-            .terms
-            .iter()
-            .map(|term| canonicalize_term(term, &mut mapping, &mut counter))
-            .collect(),
-    }
-}
-
-fn canonicalize_term(
-    term: &Term,
-    mapping: &mut HashMap<Symbol, Symbol>,
-    counter: &mut usize,
-) -> Term {
-    match term {
-        Term::Variable(var) => {
-            let entry = mapping.entry(var.clone()).or_insert_with(|| {
-                let name = format!("_C{}", *counter);
-                *counter += 1;
-                Intern::new(name)
-            });
-            Term::Variable(entry.clone())
-        }
-        Term::Constant(_) => term.clone(),
-        Term::Compound(functor, args) => Term::Compound(
-            functor.clone(),
-            args.iter()
-                .map(|arg| canonicalize_term(arg, mapping, counter))
-                .collect(),
-        ),
-        Term::Range(start, end) => Term::Range(
-            Box::new(canonicalize_term(start, mapping, counter)),
-            Box::new(canonicalize_term(end, mapping, counter)),
-        ),
-    }
-}
-
-fn apply_builtin_with_subst(
-    subst: &Substitution,
-    builtin: &builtins::BuiltIn,
-) -> builtins::BuiltIn {
-    match builtin {
-        builtins::BuiltIn::Comparison(op, left, right) => {
-            builtins::BuiltIn::Comparison(op.clone(), subst.apply(left), subst.apply(right))
-        }
-        builtins::BuiltIn::True => builtins::BuiltIn::True,
-        builtins::BuiltIn::Fail => builtins::BuiltIn::Fail,
-    }
-}
-
-fn evaluate_builtin_with_subst(subst: &Substitution, builtin: &builtins::BuiltIn) -> Option<bool> {
-    let applied = apply_builtin_with_subst(subst, builtin);
-    builtins::eval_builtin(&applied, subst).or_else(|| match &applied {
-        builtins::BuiltIn::Comparison(op, left, right) => match op {
-            builtins::CompOp::Eq => Some(left == right),
-            builtins::CompOp::Neq => Some(left != right),
-            _ => None,
-        },
-        builtins::BuiltIn::True => Some(true),
-        builtins::BuiltIn::Fail => Some(false),
-    })
-}
-
 /// Check positive and negative assertions against query results
 fn check_assertions(
     test_case: &TestCase,
@@ -776,10 +702,12 @@ fn check_assertions(
         } else {
             // Check if this atom matches any result
             let matches = results.iter().any(|subst| {
-                query_atom_for_assertions.as_ref().map_or(false, |query_atom| {
-                    let instantiated = subst.apply_atom(query_atom);
-                    atoms_match(&instantiated, &substituted)
-                })
+                query_atom_for_assertions
+                    .as_ref()
+                    .map_or(false, |query_atom| {
+                        let instantiated = subst.apply_atom(query_atom);
+                        atoms_match(&instantiated, &substituted)
+                    })
             });
 
             if !matches {
@@ -794,10 +722,12 @@ fn check_assertions(
 
         // Check if this atom matches any result
         let matches = results.iter().any(|subst| {
-            query_atom_for_assertions.as_ref().map_or(false, |query_atom| {
-                let instantiated = subst.apply_atom(query_atom);
-                atoms_match(&instantiated, &substituted)
-            })
+            query_atom_for_assertions
+                .as_ref()
+                .map_or(false, |query_atom| {
+                    let instantiated = subst.apply_atom(query_atom);
+                    atoms_match(&instantiated, &substituted)
+                })
         });
 
         if matches {
@@ -878,8 +808,114 @@ fn format_term_pretty(term: &Term) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use internment::Intern;
     use proclog::ast::{Literal, Rule, Statement, Term, Value};
     use proclog::parser::parse_program;
+
+    fn atom_const(name: &str) -> Term {
+        Term::Constant(Value::Atom(Intern::new(name.to_string())))
+    }
+
+    fn var(name: &str) -> Term {
+        Term::Variable(Intern::new(name.to_string()))
+    }
+
+    fn make_atom(predicate: &str, terms: Vec<Term>) -> Atom {
+        Atom {
+            predicate: Intern::new(predicate.to_string()),
+            terms,
+        }
+    }
+    #[test]
+    fn rule_fallback_uses_library_grounding() {
+        let mut db = FactDatabase::new();
+        let parent_fact = make_atom("parent", vec![atom_const("alice")]);
+        db.insert(parent_fact).unwrap();
+
+        let rules = vec![Rule {
+            head: make_atom("person", vec![var("X")]),
+            body: vec![Literal::Positive(make_atom("parent", vec![var("X")]))],
+        }];
+
+        let query = proclog::ast::Query {
+            body: vec![Literal::Positive(make_atom(
+                "person",
+                vec![atom_const("alice")],
+            ))],
+        };
+
+        assert!(evaluate_query(&query, &db).is_empty());
+        assert!(should_use_rule_fallback(&query, &rules));
+
+        let results = evaluate_query_with_rules(&query, &db, &rules);
+        assert_eq!(results.len(), 1, "Fallback should derive person(alice)");
+    }
+
+    #[test]
+    fn rule_fallback_handles_builtin_comparison() {
+        let mut db = FactDatabase::new();
+        db.insert(make_atom(
+            "item",
+            vec![
+                atom_const("item1"),
+                atom_const("sword"),
+                atom_const("common"),
+                Term::Constant(Value::Integer(1)),
+                Term::Constant(Value::Integer(10)),
+            ],
+        ))
+        .unwrap();
+        db.insert(make_atom(
+            "item",
+            vec![
+                atom_const("item2"),
+                atom_const("sword"),
+                atom_const("rare"),
+                Term::Constant(Value::Integer(2)),
+                Term::Constant(Value::Integer(20)),
+            ],
+        ))
+        .unwrap();
+
+        let rules = vec![Rule {
+            head: make_atom("better_than_common", vec![var("Item")]),
+            body: vec![
+                Literal::Positive(make_atom(
+                    "item",
+                    vec![
+                        var("Item"),
+                        var("Type"),
+                        var("Rarity"),
+                        var("RequiredLevel"),
+                        var("Price"),
+                    ],
+                )),
+                Literal::Positive(make_atom("=", vec![var("Rarity"), atom_const("rare")])),
+            ],
+        }];
+
+        let query = proclog::ast::Query {
+            body: vec![Literal::Positive(make_atom(
+                "better_than_common",
+                vec![atom_const("item2")],
+            ))],
+        };
+
+        assert!(evaluate_query(&query, &db).is_empty());
+
+        let derived = ground_rule(&rules[0], &db);
+        assert!(
+            derived.is_empty(),
+            "Expected library grounding to skip equality without numeric terms: {:?}",
+            derived
+        );
+
+        let results = evaluate_query_with_rules(&query, &db, &rules);
+        assert!(
+            !results.is_empty(),
+            "Expected fallback to derive better_than_common(item2)"
+        );
+    }
 
     #[test]
     fn test_simple_passing_test() {
@@ -1104,7 +1140,6 @@ mod tests {
         assert_eq!(test_block.statements.len(), 7);
         assert_eq!(test_block.test_cases.len(), 4);
 
-        use internment::Intern;
         use proclog::constants::ConstantEnv;
         use proclog::evaluation::semi_naive_evaluation;
 
