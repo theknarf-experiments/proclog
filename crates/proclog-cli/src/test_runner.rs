@@ -1468,10 +1468,12 @@ mod tests {
             #test "quest level requirements" {
                 quest(gather_herbs).
                 quest_level(gather_herbs, 1).
+                character_level(1).
 
                 available_at_level(Quest, Level) :-
                     quest(Quest),
                     quest_level(Quest, Required),
+                    character_level(Level),
                     Level >= Required.
 
                 ?- available_at_level(gather_herbs, 1).
@@ -1496,9 +1498,11 @@ mod tests {
             #test "item level requirements" {
                 item(iron_sword, sword, common, 1, 10).
                 item(steel_sword, sword, rare, 5, 50).
+                character_level(5).
 
                 level_appropriate(Item, CharLevel) :-
                     item(Item, _, _, ItemLevel, _),
+                    character_level(CharLevel),
                     CharLevel >= ItemLevel.
 
                 ?- level_appropriate(steel_sword, 5).
