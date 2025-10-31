@@ -2,6 +2,7 @@ type CrosstermResult<T> = std::io::Result<T>;
 
 pub mod style {
     #[derive(Clone, Copy)]
+    #[allow(dead_code)]
     pub enum Color {
         DarkGray,
         Rgb(u8, u8, u8),
@@ -313,7 +314,7 @@ pub mod text {
 
 pub mod widgets {
     use super::{backend::Backend, layout::Rect, style, Frame, Widget};
-    use crate::text::Line;
+    use crate::ratatui::text::Line;
 
     #[derive(Clone, Copy, Default)]
     pub struct Borders {
@@ -512,11 +513,6 @@ pub mod widgets {
 
 use backend::Backend;
 use layout::Rect;
-
-pub use backend::CrosstermBackend;
-pub use layout::{Constraint, Direction, Layout};
-pub use text::Line;
-pub use widgets::{Block, Borders, Paragraph, Wrap};
 
 pub struct Terminal<B: Backend> {
     backend: B,
