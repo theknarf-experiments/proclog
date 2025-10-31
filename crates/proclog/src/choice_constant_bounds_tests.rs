@@ -225,4 +225,20 @@ mod choice_constant_bounds_tests {
         // Should have 2×2 = 4 answer sets (each player independently chooses 1 weapon)
         assert_eq!(answer_sets.len(), 4);
     }
+
+    #[test]
+    fn test_non_ground_rule_produces_no_answer_sets() {
+        let program_text = r#"
+            base(a).
+            bad(X) :- base(a).
+        "#;
+
+        let program = parse_program(program_text).expect("Failed to parse program");
+        let answer_sets = asp_evaluation(&program);
+
+        assert!(
+            answer_sets.is_empty(),
+            "Programs that derive non-ground atoms should yield no answer sets"
+        );
+    }
 }

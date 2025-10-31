@@ -42,7 +42,8 @@ mod query_integration_tests {
         }
 
         // Evaluate to derive all facts
-        let result_db = semi_naive_evaluation(&rules, facts);
+        let result_db =
+            semi_naive_evaluation(&rules, facts).expect("semi-naive evaluation should succeed");
 
         // Query 1: Ground query - is john an ancestor of sue?
         let query1 = parse_query("?- ancestor(john, sue).").expect("Failed to parse query");
@@ -105,7 +106,8 @@ mod query_integration_tests {
             }
         }
 
-        let result_db = semi_naive_evaluation(&rules, facts);
+        let result_db =
+            semi_naive_evaluation(&rules, facts).expect("semi-naive evaluation should succeed");
 
         // Query for alive people
         let query = parse_query("?- alive(X).").expect("Failed to parse query");
@@ -206,7 +208,8 @@ mod query_integration_tests {
             }
         }
 
-        let result_db = semi_naive_evaluation(&rules, facts);
+        let result_db =
+            semi_naive_evaluation(&rules, facts).expect("semi-naive evaluation should succeed");
 
         // Query for all valid items
         let query = parse_query("?- valid(X).").expect("Failed to parse query");
@@ -250,7 +253,8 @@ mod query_integration_tests {
             }
         }
 
-        let result_db = semi_naive_evaluation(&rules, facts);
+        let result_db =
+            semi_naive_evaluation(&rules, facts).expect("semi-naive evaluation should succeed");
 
         // Query for female ancestors of anna
         let query = parse_query("?- female_ancestor(X, anna).").expect("Failed to parse query");
@@ -534,7 +538,8 @@ mod query_integration_tests {
             }
         }
 
-        let result_db = semi_naive_evaluation(&rules, facts);
+        let result_db =
+            semi_naive_evaluation(&rules, facts).expect("semi-naive evaluation should succeed");
 
         // Query: ?- perfect(X).
         let query = parse_query("?- perfect(X).").expect("Failed to parse query");
@@ -597,7 +602,8 @@ mod query_integration_tests {
             }
         }
 
-        let result_db = semi_naive_evaluation(&rules, facts);
+        let result_db =
+            semi_naive_evaluation(&rules, facts).expect("semi-naive evaluation should succeed");
 
         // Query: ?- passed(X).
         let query = parse_query("?- passed(X).").expect("Failed to parse query");
