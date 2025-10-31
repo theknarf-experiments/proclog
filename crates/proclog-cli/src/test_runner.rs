@@ -65,7 +65,6 @@ pub fn run_test_block(base_statements: &[Statement], test_block: &TestBlock) -> 
     let mut rules = Vec::new();
     let mut constraints = Vec::new();
     let mut choice_rules = Vec::new();
-    let mut prob_facts = Vec::new();
     let mut has_asp_statements = false;
 
     let mut process_statement = |statement: &Statement| match statement {
@@ -159,15 +158,6 @@ pub fn run_test_block(base_statements: &[Statement], test_block: &TestBlock) -> 
                 body: substituted_body,
             });
             has_asp_statements = true;
-        }
-        Statement::ProbFact(prob) => {
-            // Substitute constants in probabilistic fact
-            let substituted_atom = const_env.substitute_atom(&prob.atom);
-            prob_facts.push(proclog::ast::ProbFact {
-                probability: prob.probability,
-                atom: substituted_atom,
-            });
-            // Probabilistic facts alone don't make it ASP - need choice rules or constraints
         }
         Statement::ConstDecl(_) => {
             // Already handled when building const_env

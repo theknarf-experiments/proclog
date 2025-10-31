@@ -1,13 +1,12 @@
 # ProcLog
 
-A Datalog variant for procedural generation in games, combining Answer Set Programming (ASP), probabilistic logic programming, and declarative design.
+A Datalog variant for procedural generation in games, combining Answer Set Programming (ASP) and declarative design.
 
 ### Syntax Support
 
 - **Facts**: `parent(john, mary).`
 - **Rules**: `ancestor(X, Z) :- parent(X, Y), ancestor(Y, Z).`
 - **Constraints**: `:- unsafe(X).`
-- **Probabilistic Facts**: `0.7 :: treasure(X).`
 - **Negation**: `not reachable(X, Y)`
 - **Comments**:
   - Line comments: `% This is a comment`

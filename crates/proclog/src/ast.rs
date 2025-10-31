@@ -1,12 +1,12 @@
 // Abstract Syntax Tree (AST) definitions for ProcLog
 //!
 //! This module defines the core data structures representing a ProcLog program.
-//! ProcLog combines features from Datalog, Answer Set Programming (ASP), and probabilistic logic.
+//! ProcLog combines features from Datalog, Answer Set Programming (ASP), and declarative design.
 //!
 //! # Key Components
 //!
 //! - **Program**: A collection of statements (facts, rules, constraints, etc.)
-//! - **Statement**: Top-level constructs (facts, rules, constraints, probabilistic facts, const decls, choice rules)
+//! - **Statement**: Top-level constructs (facts, rules, constraints, const decls, choice rules)
 //! - **Atom**: Predicate applied to terms (e.g., `parent(john, mary)`)
 //! - **Term**: Variables, constants, compound terms, or ranges
 //! - **Value**: Constant values (integers, floats, booleans, strings, atoms)
@@ -32,7 +32,7 @@ use internment::Intern;
 /// Interned string for efficient storage and comparison
 pub type Symbol = Intern<String>;
 
-/// A ProcLog program consists of facts, rules, constraints, and probabilistic facts
+/// A ProcLog program consists of facts, rules, constraints, and other statements
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program {
     pub statements: Vec<Statement>,
@@ -43,7 +43,6 @@ pub enum Statement {
     Fact(Fact),
     Rule(Rule),
     Constraint(Constraint),
-    ProbFact(ProbFact),
     ConstDecl(ConstDecl),
     ChoiceRule(ChoiceRule),
     Test(TestBlock),
@@ -66,13 +65,6 @@ pub struct Rule {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Constraint {
     pub body: Vec<Literal>,
-}
-
-/// A probabilistic fact: `0.7 :: treasure(X).`
-#[derive(Debug, Clone, PartialEq)]
-pub struct ProbFact {
-    pub probability: f64,
-    pub atom: Atom,
 }
 
 /// A constant declaration: `#const width = 10.` or `#const pi = 3.14.` or `#const name = foo.`

@@ -193,7 +193,7 @@ pub fn asp_evaluation(program: &Program) -> Vec<AnswerSet> {
             Statement::ChoiceRule(choice) => {
                 choice_rules.push(choice.clone());
             }
-            Statement::ConstDecl(_) | Statement::ProbFact(_) | Statement::Test(_) => {
+            Statement::ConstDecl(_) | Statement::Test(_) => {
                 // Already handled by const_env or not relevant for ASP
                 // Test blocks are handled by the test runner, not ASP evaluation
             }
