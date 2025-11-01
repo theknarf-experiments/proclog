@@ -423,8 +423,7 @@ mod tests {
         .unwrap();
 
         let rules = vec![];
-        let result =
-            naive_evaluation(&rules, db.clone()).expect("naive evaluation should succeed");
+        let result = naive_evaluation(&rules, db.clone()).expect("naive evaluation should succeed");
 
         // No rules means no new facts
         assert_eq!(result.len(), db.len());

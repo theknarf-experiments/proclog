@@ -277,7 +277,11 @@ fn format_parse_error(file_name: &str, source: &str, error: &Simple<char>) -> St
 
     if !expected.is_empty() {
         let expected_list = expected.join(", ");
-        message = format!("{}. Expected one of: {}", message.trim_end_matches('.'), expected_list);
+        message = format!(
+            "{}. Expected one of: {}",
+            message.trim_end_matches('.'),
+            expected_list
+        );
     } else if !message.ends_with('.') {
         message.push('.');
     }

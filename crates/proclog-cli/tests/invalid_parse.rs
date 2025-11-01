@@ -19,8 +19,13 @@ fn reports_parse_error_with_context() {
             "\u{1b}[31merror:\u{1b}[0m Failed to parse '{}'",
             file_display
         )))
-        .stderr(predicate::str::contains(format!(" --> {}:2:1", file_display)))
+        .stderr(predicate::str::contains(format!(
+            " --> {}:2:1",
+            file_display
+        )))
         .stderr(predicate::str::contains("^"))
-        .stderr(predicate::str::contains("Unexpected character '#'")
-            .and(predicate::str::contains("term")));
+        .stderr(
+            predicate::str::contains("Unexpected character '#'")
+                .and(predicate::str::contains("term")),
+        );
 }

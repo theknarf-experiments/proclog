@@ -1001,11 +1001,15 @@ mod tests {
         let chain_len = 30;
 
         for i in 0..=chain_len {
-            db.insert(make_atom("link", vec![int(i as i64), int((i + 1) as i64)])).unwrap();
+            db.insert(make_atom("link", vec![int(i as i64), int((i + 1) as i64)]))
+                .unwrap();
         }
 
         let mut body = Vec::new();
-        body.push(Literal::Positive(make_atom("link", vec![int(0), var("X1")])));
+        body.push(Literal::Positive(make_atom(
+            "link",
+            vec![int(0), var("X1")],
+        )));
 
         for i in 1..=chain_len {
             let current = format!("X{i}");
@@ -1501,24 +1505,15 @@ mod tests {
     fn test_builtin_filters_identical_in_pure_and_mixed() {
         let mut full_db = FactDatabase::new();
         full_db
-            .insert(make_atom(
-                "number",
-                vec![Term::Constant(Value::Integer(7))],
-            ))
+            .insert(make_atom("number", vec![Term::Constant(Value::Integer(7))]))
             .unwrap();
         full_db
-            .insert(make_atom(
-                "number",
-                vec![Term::Constant(Value::Integer(3))],
-            ))
+            .insert(make_atom("number", vec![Term::Constant(Value::Integer(3))]))
             .unwrap();
 
         let mut delta = FactDatabase::new();
         delta
-            .insert(make_atom(
-                "number",
-                vec![Term::Constant(Value::Integer(7))],
-            ))
+            .insert(make_atom("number", vec![Term::Constant(Value::Integer(7))]))
             .unwrap();
 
         let body = vec![
@@ -1532,13 +1527,13 @@ mod tests {
         let pure = normalize_substitutions(satisfy_body(&body, &full_db));
 
         for delta_pos in 0..body.len() {
-            let mixed = normalize_substitutions(satisfy_body_mixed(
-                &body,
-                &delta,
-                &full_db,
-                delta_pos,
-            ));
-            assert_eq!(mixed, pure, "mixed results differed at delta_pos {}", delta_pos);
+            let mixed =
+                normalize_substitutions(satisfy_body_mixed(&body, &delta, &full_db, delta_pos));
+            assert_eq!(
+                mixed, pure,
+                "mixed results differed at delta_pos {}",
+                delta_pos
+            );
         }
     }
 
@@ -1605,13 +1600,13 @@ mod tests {
         let pure = normalize_substitutions(satisfy_body(&body, &full_db));
 
         for delta_pos in 0..body.len() {
-            let mixed = normalize_substitutions(satisfy_body_mixed(
-                &body,
-                &delta,
-                &full_db,
-                delta_pos,
-            ));
-            assert_eq!(mixed, pure, "mixed results differed at delta_pos {}", delta_pos);
+            let mixed =
+                normalize_substitutions(satisfy_body_mixed(&body, &delta, &full_db, delta_pos));
+            assert_eq!(
+                mixed, pure,
+                "mixed results differed at delta_pos {}",
+                delta_pos
+            );
         }
     }
 

@@ -11,3 +11,6 @@ internment = "0.8"
 crossterm = "0.27"
 clap = { version = "4.5", features = ["derive"] }
 notify = "6"
+rand = "0.8"
+rand_chacha = "0.3"
+ratatui = "0.27"

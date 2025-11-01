@@ -1,7 +1,6 @@
 mod cli;
 mod repl;
 mod test_runner;
-pub(crate) mod ratatui;
 
 use clap::{Parser, Subcommand};
 

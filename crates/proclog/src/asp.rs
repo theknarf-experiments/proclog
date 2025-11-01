@@ -30,13 +30,158 @@ use crate::ast::{Atom, Program, Statement, Term, Value};
 use crate::constants::ConstantEnv;
 use crate::database::FactDatabase;
 use crate::evaluation::stratified_evaluation_with_constraints;
+use rand::Rng;
+use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
 use std::collections::HashSet;
 
 /// An answer set is a stable model - a set of ground atoms
 #[cfg_attr(not(test), allow(dead_code))]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AnswerSet {
     pub atoms: HashSet<Atom>,
+}
+
+/// Sample answer sets using deterministic randomness.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn asp_sample(program: &Program, seed: u64, sample_count: usize) -> Vec<AnswerSet> {
+    if sample_count == 0 {
+        return Vec::new();
+    }
+
+    let const_env = ConstantEnv::from_program(program);
+    let mut base_facts = FactDatabase::new();
+    let mut rules = Vec::new();
+    let mut constraints = Vec::new();
+    let mut choice_rules = Vec::new();
+
+    for statement in &program.statements {
+        match statement {
+            Statement::Fact(fact) => {
+                let expanded = crate::grounding::expand_atom_ranges(&fact.atom, &const_env);
+                for atom in expanded {
+                    base_facts.insert(atom).unwrap();
+                }
+            }
+            Statement::Rule(rule) => rules.push(rule.clone()),
+            Statement::Constraint(constraint) => constraints.push(constraint.clone()),
+            Statement::ChoiceRule(choice) => choice_rules.push(choice.clone()),
+            Statement::ConstDecl(_) | Statement::Test(_) => {
+                // Already handled or not relevant
+            }
+        }
+    }
+
+    let derived_db = if rules.is_empty() {
+        base_facts.clone()
+    } else {
+        match stratified_evaluation_with_constraints(&rules, &[], base_facts.clone()) {
+            Ok(db) => db,
+            Err(_) => return Vec::new(),
+        }
+    };
+
+    if choice_rules.is_empty() {
+        let evaluation =
+            stratified_evaluation_with_constraints(&rules, &constraints, base_facts.clone());
+        if let Ok(db) = evaluation {
+            let atoms: HashSet<Atom> = db.all_facts().into_iter().cloned().collect();
+            return vec![AnswerSet { atoms }];
+        } else {
+            return Vec::new();
+        }
+    }
+
+    let mut choice_rule_subsets: Vec<Vec<Vec<Atom>>> = Vec::new();
+
+    for choice in &choice_rules {
+        let groups = crate::grounding::ground_choice_rule_split(choice, &derived_db, &const_env);
+
+        for group in groups {
+            let mut unique_atoms = Vec::new();
+            for atom in group {
+                if !unique_atoms.contains(&atom) {
+                    unique_atoms.push(atom);
+                }
+            }
+
+            let min_size = choice
+                .lower_bound
+                .as_ref()
+                .and_then(|term| resolve_bound(term, &const_env))
+                .unwrap_or(0)
+                .max(0) as usize;
+            let max_size = choice
+                .upper_bound
+                .as_ref()
+                .and_then(|term| resolve_bound(term, &const_env))
+                .map(|u| u.max(0) as usize)
+                .unwrap_or(unique_atoms.len());
+
+            let subsets = generate_subsets(&unique_atoms, min_size, max_size);
+            if subsets.is_empty() {
+                return Vec::new();
+            }
+            choice_rule_subsets.push(subsets);
+        }
+    }
+
+    if choice_rule_subsets.is_empty() {
+        let evaluation =
+            stratified_evaluation_with_constraints(&rules, &constraints, base_facts.clone());
+        if let Ok(db) = evaluation {
+            let atoms: HashSet<Atom> = db.all_facts().into_iter().cloned().collect();
+            return vec![AnswerSet { atoms }];
+        } else {
+            return Vec::new();
+        }
+    }
+
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    let mut samples = Vec::new();
+    let mut attempts = 0usize;
+    let max_attempts = sample_count
+        .saturating_mul(choice_rule_subsets.len().max(1) * 50)
+        .saturating_add(100);
+
+    while samples.len() < sample_count && attempts < max_attempts {
+        attempts += 1;
+
+        let mut candidate_atoms = Vec::new();
+        let mut unsatisfiable = false;
+
+        for subsets in &choice_rule_subsets {
+            if subsets.is_empty() {
+                unsatisfiable = true;
+                break;
+            }
+            let idx = rng.gen_range(0..subsets.len());
+            candidate_atoms.extend(subsets[idx].clone());
+        }
+
+        if unsatisfiable {
+            break;
+        }
+
+        let mut test_db = base_facts.clone();
+        for atom in &candidate_atoms {
+            test_db
+                .insert(atom.clone())
+                .expect("choice candidate contained non-ground atom");
+        }
+
+        if let Ok(final_db) = stratified_evaluation_with_constraints(&rules, &constraints, test_db)
+        {
+            let atoms: HashSet<Atom> = final_db.all_facts().into_iter().cloned().collect();
+            let answer_set = AnswerSet { atoms };
+
+            if !samples.iter().any(|existing| existing == &answer_set) {
+                samples.push(answer_set);
+            }
+        }
+    }
+
+    samples
 }
 
 /// Resolve a bound term to an integer value
@@ -237,12 +382,13 @@ pub fn asp_evaluation(program: &Program) -> Vec<AnswerSet> {
 
         // For each group (body substitution), create an independent choice
         for group in groups {
-            // Remove duplicates within this group
-            let unique_atoms: Vec<Atom> = group
-                .into_iter()
-                .collect::<HashSet<_>>()
-                .into_iter()
-                .collect();
+            // Remove duplicates within this group while preserving order
+            let mut unique_atoms = Vec::new();
+            for atom in group {
+                if !unique_atoms.contains(&atom) {
+                    unique_atoms.push(atom);
+                }
+            }
 
             // Determine bounds for this specific choice rule
             // Resolve bounds from Terms to i64 values, substituting constant names
@@ -297,6 +443,72 @@ mod tests {
     use super::*;
     use crate::parser::parse_program;
     use internment::Intern;
+
+    #[test]
+    fn test_seeded_sampling_is_deterministic() {
+        let input = r#"
+            item(a).
+            item(b).
+
+            { selected(X) : item(X) }.
+        "#;
+
+        let program = parse_program(input).unwrap();
+
+        let sample1 = asp_sample(&program, 42, 2);
+        let sample2 = asp_sample(&program, 42, 2);
+
+        assert_eq!(sample1, sample2);
+        assert_eq!(sample1.len(), 2);
+    }
+
+    #[test]
+    fn test_seed_changes_sampling_result() {
+        let input = r#"
+            item(a).
+            item(b).
+            item(c).
+
+            { selected(X) : item(X) }.
+        "#;
+
+        let program = parse_program(input).unwrap();
+
+        let sample_a = asp_sample(&program, 1, 1);
+        let sample_b = asp_sample(&program, 2, 1);
+
+        assert_ne!(sample_a, sample_b);
+    }
+
+    #[test]
+    fn test_seeded_sampling_respects_constraints() {
+        let input = r#"
+            item(a).
+            item(b).
+
+            { selected(X) : item(X) }.
+
+            % Must pick at least one item
+            :- not selected(a), not selected(b).
+        "#;
+
+        let program = parse_program(input).unwrap();
+        let samples = asp_sample(&program, 99, 3);
+
+        let selected_symbol = Intern::new("selected".to_string());
+
+        for answer_set in samples {
+            let selected_count = answer_set
+                .atoms
+                .iter()
+                .filter(|atom| atom.predicate == selected_symbol)
+                .count();
+            assert!(
+                selected_count >= 1,
+                "Expected at least one selected item in sampled answer set"
+            );
+        }
+    }
 
     #[test]
     fn test_simple_choice_no_constraints() {

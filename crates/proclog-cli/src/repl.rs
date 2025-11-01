@@ -1,12 +1,15 @@
 use chumsky::error::{Simple, SimpleReason};
-use proclog::asp::{asp_evaluation, AnswerSet};
-use proclog::ast::{Constraint, Literal, Query, Rule, Statement, Symbol, Term, Value};
+use proclog::asp::{asp_evaluation, asp_sample, AnswerSet};
+use proclog::ast::{
+    Atom, Constraint, Literal, Program, Query, Rule, Statement, Symbol, Term, Value,
+};
 use proclog::constants::ConstantEnv;
 use proclog::database::FactDatabase;
 use proclog::evaluation::stratified_evaluation_with_constraints;
 use proclog::parser::{parse_program, parse_query};
 use proclog::query::{evaluate_query, query_variables};
 use proclog::unification::Substitution;
+use std::collections::HashSet;
 
 /// Kind of response produced by the REPL engine.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,6 +54,20 @@ pub struct ReplEngine {
     statements: Vec<Statement>,
     compiled: Option<CompiledProgram>,
     dirty: bool,
+    sample_count: usize,
+    sample_seed: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ReplStats {
+    pub fact_count: usize,
+    pub rule_count: usize,
+    pub constraint_count: usize,
+    pub choice_rule_count: usize,
+    pub constant_count: usize,
+    pub sample_count: usize,
+    pub sample_seed: u64,
+    pub cached_answer_sets: Option<usize>,
 }
 
 impl Default for ReplEngine {
@@ -66,6 +83,8 @@ impl ReplEngine {
             statements: Vec::new(),
             compiled: None,
             dirty: false,
+            sample_count: 5,
+            sample_seed: 0,
         }
     }
 
@@ -74,6 +93,10 @@ impl ReplEngine {
         let trimmed = input.trim();
         if trimmed.is_empty() {
             return EngineResponse::info(Vec::new());
+        }
+
+        if trimmed.starts_with(":sample") {
+            return self.handle_sample_command(trimmed);
         }
 
         if trimmed.starts_with("?-") {
@@ -144,6 +167,90 @@ impl ReplEngine {
         }
     }
 
+    fn handle_sample_command(&mut self, input: &str) -> EngineResponse {
+        let mut parts = input.split_whitespace();
+        let _ = parts.next(); // skip ":sample"
+
+        let mut count_arg = None;
+        let mut seed_arg = None;
+
+        if let Some(part) = parts.next() {
+            match part.parse::<usize>() {
+                Ok(value) => count_arg = Some(value),
+                Err(_) => {
+                    return EngineResponse::error(vec![format!(
+                        "Invalid sample count '{}'. Expected a positive integer.",
+                        part
+                    )])
+                }
+            }
+        }
+
+        if let Some(part) = parts.next() {
+            match part.parse::<u64>() {
+                Ok(value) => seed_arg = Some(value),
+                Err(_) => {
+                    return EngineResponse::error(vec![format!(
+                        "Invalid sample seed '{}'. Expected a non-negative integer.",
+                        part
+                    )])
+                }
+            }
+        }
+
+        if parts.next().is_some() {
+            return EngineResponse::error(vec!["Usage: :sample [count] [seed]".to_string()]);
+        }
+
+        let count = count_arg.unwrap_or(self.sample_count);
+        if count == 0 {
+            return EngineResponse::error(vec![
+                "Sample count must be greater than zero.".to_string()
+            ]);
+        }
+
+        let seed = seed_arg.unwrap_or(self.sample_seed);
+
+        self.sample_count = count;
+        self.sample_seed = seed;
+
+        match self.ensure_compiled() {
+            Ok(compiled) => match &compiled.result {
+                CompiledResult::Datalog(db) => {
+                    let atoms: HashSet<Atom> = db.all_facts().into_iter().cloned().collect();
+                    let answer_set = AnswerSet { atoms };
+                    let mut lines = Vec::new();
+                    lines.push(
+                        "Program has no choice rules; deterministic result shown.".to_string(),
+                    );
+                    lines.push(format_answer_set_line(1, &answer_set));
+                    EngineResponse::output(lines)
+                }
+                CompiledResult::Asp { program, .. } => {
+                    let samples = asp_sample(program, seed, count);
+                    let mut lines = Vec::new();
+                    lines.push(format!(
+                        "Sampled {} answer set(s) with seed {} (requested {}).",
+                        samples.len(),
+                        seed,
+                        count
+                    ));
+
+                    if samples.is_empty() {
+                        lines.push("No answer sets found.".to_string());
+                    } else {
+                        for (idx, answer_set) in samples.iter().enumerate() {
+                            lines.push(format_answer_set_line(idx + 1, answer_set));
+                        }
+                    }
+
+                    EngineResponse::output(lines)
+                }
+            },
+            Err(errors) => EngineResponse::error(errors),
+        }
+    }
+
     fn evaluate_query(&mut self, query: Query) -> EngineResponse {
         match self.ensure_compiled() {
             Ok(compiled) => {
@@ -160,7 +267,7 @@ impl ReplEngine {
                         let results = evaluate_query(&substituted_query, db);
                         format_query_results(&substituted_query, &results)
                     }
-                    CompiledResult::Asp(answer_sets) => {
+                    CompiledResult::Asp { answer_sets, .. } => {
                         let mut all_results = Vec::new();
                         let mut answer_set_count = 0;
 
@@ -321,8 +428,12 @@ impl ReplEngine {
                 statements.push(Statement::ChoiceRule(choice.clone()));
             }
 
-            let program = proclog::ast::Program { statements };
-            CompiledResult::Asp(asp_evaluation(&program))
+            let program = Program { statements };
+            let answer_sets = asp_evaluation(&program);
+            CompiledResult::Asp {
+                program,
+                answer_sets,
+            }
         } else {
             // Use regular Datalog evaluation
             let derived_db =
@@ -333,11 +444,52 @@ impl ReplEngine {
 
         Ok(CompiledProgram { const_env, result })
     }
+
+    pub fn stats(&self) -> ReplStats {
+        let mut fact_count = 0usize;
+        let mut rule_count = 0usize;
+        let mut constraint_count = 0usize;
+        let mut choice_rule_count = 0usize;
+        let mut constant_count = 0usize;
+
+        for statement in &self.statements {
+            match statement {
+                Statement::Fact(_) => fact_count += 1,
+                Statement::Rule(_) => rule_count += 1,
+                Statement::Constraint(_) => constraint_count += 1,
+                Statement::ChoiceRule(_) => choice_rule_count += 1,
+                Statement::ConstDecl(_) => constant_count += 1,
+                Statement::Test(_) => {}
+            }
+        }
+
+        let cached_answer_sets =
+            self.compiled
+                .as_ref()
+                .and_then(|compiled| match &compiled.result {
+                    CompiledResult::Asp { answer_sets, .. } => Some(answer_sets.len()),
+                    CompiledResult::Datalog(_) => None,
+                });
+
+        ReplStats {
+            fact_count,
+            rule_count,
+            constraint_count,
+            choice_rule_count,
+            constant_count,
+            sample_count: self.sample_count,
+            sample_seed: self.sample_seed,
+            cached_answer_sets,
+        }
+    }
 }
 
 enum CompiledResult {
     Datalog(FactDatabase),
-    Asp(Vec<AnswerSet>),
+    Asp {
+        program: Program,
+        answer_sets: Vec<AnswerSet>,
+    },
 }
 
 struct CompiledProgram {
@@ -475,6 +627,26 @@ fn format_term(term: &Term) -> String {
             }
         }
         Term::Range(start, end) => format!("{}..{}", format_term(start), format_term(end)),
+    }
+}
+
+fn format_atom(atom: &Atom) -> String {
+    if atom.terms.is_empty() {
+        atom.predicate.as_ref().to_string()
+    } else {
+        let rendered_terms: Vec<String> = atom.terms.iter().map(format_term).collect();
+        format!("{}({})", atom.predicate.as_ref(), rendered_terms.join(", "))
+    }
+}
+
+fn format_answer_set_line(index: usize, answer_set: &AnswerSet) -> String {
+    let mut atoms: Vec<String> = answer_set.atoms.iter().map(format_atom).collect();
+    atoms.sort();
+
+    if atoms.is_empty() {
+        format!("{}: {{}}", index)
+    } else {
+        format!("{}: {{{}}}", index, atoms.join(", "))
     }
 }
 
@@ -710,6 +882,40 @@ mod tests {
         assert_eq!(response.kind, ResponseKind::Output);
         // Should contain results from ASP evaluation
         assert!(response.lines.len() > 0);
+    }
+
+    #[test]
+    fn test_sample_command_outputs_samples() {
+        let mut engine = ReplEngine::new();
+        engine.process_line("item(a).");
+        engine.process_line("item(b).");
+        engine.process_line("{ selected(X) : item(X) }.");
+
+        let response = engine.process_line(":sample 2 42");
+        assert_eq!(response.kind, ResponseKind::Output);
+        assert!(
+            response.lines[0].contains("Sampled 2 answer set(s)")
+                || response.lines[0].contains("Sampled 1 answer set(s)")
+        );
+        assert!(
+            response
+                .lines
+                .iter()
+                .skip(1)
+                .any(|line| line.contains("selected(")),
+            "Expected sampled answer sets to be listed"
+        );
+    }
+
+    #[test]
+    fn test_sample_command_invalid_arguments() {
+        let mut engine = ReplEngine::new();
+        let response = engine.process_line(":sample abc");
+        assert_eq!(response.kind, ResponseKind::Error);
+        assert!(response
+            .lines
+            .iter()
+            .any(|line| line.contains("Invalid sample count")));
     }
 
     #[test]
