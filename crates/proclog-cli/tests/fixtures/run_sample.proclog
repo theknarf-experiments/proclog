@@ -1,0 +1,4 @@
+item(a).
+item(b).
+
+{ selected(X) : item(X) }.

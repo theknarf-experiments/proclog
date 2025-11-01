@@ -41,6 +41,15 @@ enum Commands {
         #[arg(value_name = "FILE")]
         input: Option<std::path::PathBuf>,
     },
+    /// Execute a ProcLog program once (optionally sampling answer sets)
+    Run {
+        /// Optional sample count; when omitted, run normally without sampling
+        #[arg(long = "sample", value_name = "COUNT")]
+        sample: Option<usize>,
+        /// Program file to execute
+        #[arg(value_name = "FILE", required = true)]
+        file: std::path::PathBuf,
+    },
 }
 
 fn main() {
@@ -53,6 +62,12 @@ fn main() {
         Commands::Repl { input } => {
             if let Err(e) = cli::repl::run(input.as_deref()) {
                 eprintln!("Failed to start REPL: {}", e);
+                std::process::exit(1);
+            }
+        }
+        Commands::Run { sample, file } => {
+            if let Err(e) = cli::run::run(&file, sample) {
+                eprintln!("Run failed: {}", e);
                 std::process::exit(1);
             }
         }

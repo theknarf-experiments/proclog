@@ -49,139 +49,44 @@ pub fn asp_sample(program: &Program, seed: u64, sample_count: usize) -> Vec<Answ
         return Vec::new();
     }
 
-    let const_env = ConstantEnv::from_program(program);
-    let mut base_facts = FactDatabase::new();
-    let mut rules = Vec::new();
-    let mut constraints = Vec::new();
-    let mut choice_rules = Vec::new();
-
-    for statement in &program.statements {
-        match statement {
-            Statement::Fact(fact) => {
-                let expanded = crate::grounding::expand_atom_ranges(&fact.atom, &const_env);
-                for atom in expanded {
-                    base_facts.insert(atom).unwrap();
-                }
-            }
-            Statement::Rule(rule) => rules.push(rule.clone()),
-            Statement::Constraint(constraint) => constraints.push(constraint.clone()),
-            Statement::ChoiceRule(choice) => choice_rules.push(choice.clone()),
-            Statement::ConstDecl(_) | Statement::Test(_) => {
-                // Already handled or not relevant
-            }
-        }
+    let mut all_sets = asp_evaluation(program);
+    if all_sets.is_empty() {
+        return Vec::new();
     }
 
-    let derived_db = if rules.is_empty() {
-        base_facts.clone()
-    } else {
-        match stratified_evaluation_with_constraints(&rules, &[], base_facts.clone()) {
-            Ok(db) => db,
-            Err(_) => return Vec::new(),
-        }
-    };
+    sort_answer_sets(&mut all_sets);
 
-    if choice_rules.is_empty() {
-        let evaluation =
-            stratified_evaluation_with_constraints(&rules, &constraints, base_facts.clone());
-        if let Ok(db) = evaluation {
-            let atoms: HashSet<Atom> = db.all_facts().into_iter().cloned().collect();
-            return vec![AnswerSet { atoms }];
-        } else {
-            return Vec::new();
-        }
-    }
-
-    let mut choice_rule_subsets: Vec<Vec<Vec<Atom>>> = Vec::new();
-
-    for choice in &choice_rules {
-        let groups = crate::grounding::ground_choice_rule_split(choice, &derived_db, &const_env);
-
-        for group in groups {
-            let mut unique_atoms = Vec::new();
-            for atom in group {
-                if !unique_atoms.contains(&atom) {
-                    unique_atoms.push(atom);
-                }
-            }
-
-            let min_size = choice
-                .lower_bound
-                .as_ref()
-                .and_then(|term| resolve_bound(term, &const_env))
-                .unwrap_or(0)
-                .max(0) as usize;
-            let max_size = choice
-                .upper_bound
-                .as_ref()
-                .and_then(|term| resolve_bound(term, &const_env))
-                .map(|u| u.max(0) as usize)
-                .unwrap_or(unique_atoms.len());
-
-            let subsets = generate_subsets(&unique_atoms, min_size, max_size);
-            if subsets.is_empty() {
-                return Vec::new();
-            }
-            choice_rule_subsets.push(subsets);
-        }
-    }
-
-    if choice_rule_subsets.is_empty() {
-        let evaluation =
-            stratified_evaluation_with_constraints(&rules, &constraints, base_facts.clone());
-        if let Ok(db) = evaluation {
-            let atoms: HashSet<Atom> = db.all_facts().into_iter().cloned().collect();
-            return vec![AnswerSet { atoms }];
-        } else {
-            return Vec::new();
-        }
+    if sample_count >= all_sets.len() {
+        return all_sets;
     }
 
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
-    let mut samples = Vec::new();
-    let mut attempts = 0usize;
-    let max_attempts = sample_count
-        .saturating_mul(choice_rule_subsets.len().max(1) * 50)
-        .saturating_add(100);
-
-    while samples.len() < sample_count && attempts < max_attempts {
-        attempts += 1;
-
-        let mut candidate_atoms = Vec::new();
-        let mut unsatisfiable = false;
-
-        for subsets in &choice_rule_subsets {
-            if subsets.is_empty() {
-                unsatisfiable = true;
-                break;
-            }
-            let idx = rng.gen_range(0..subsets.len());
-            candidate_atoms.extend(subsets[idx].clone());
-        }
-
-        if unsatisfiable {
-            break;
-        }
-
-        let mut test_db = base_facts.clone();
-        for atom in &candidate_atoms {
-            test_db
-                .insert(atom.clone())
-                .expect("choice candidate contained non-ground atom");
-        }
-
-        if let Ok(final_db) = stratified_evaluation_with_constraints(&rules, &constraints, test_db)
-        {
-            let atoms: HashSet<Atom> = final_db.all_facts().into_iter().cloned().collect();
-            let answer_set = AnswerSet { atoms };
-
-            if !samples.iter().any(|existing| existing == &answer_set) {
-                samples.push(answer_set);
-            }
-        }
+    let mut picked = Vec::new();
+    while picked.len() < sample_count && !all_sets.is_empty() {
+        let idx = rng.gen_range(0..all_sets.len());
+        picked.push(all_sets.swap_remove(idx));
     }
 
-    samples
+    sort_answer_sets(&mut picked);
+    picked
+}
+
+fn sort_answer_sets(sets: &mut Vec<AnswerSet>) {
+    sets.sort_by(|a, b| canonical_atoms(a).cmp(&canonical_atoms(b)));
+}
+
+fn canonical_atoms(answer_set: &AnswerSet) -> Vec<String> {
+    let mut atoms: Vec<String> = answer_set
+        .atoms
+        .iter()
+        .map(|atom| format_atom(atom))
+        .collect();
+    atoms.sort();
+    atoms
+}
+
+fn format_atom(atom: &Atom) -> String {
+    format!("{:?}", atom)
 }
 
 /// Resolve a bound term to an integer value
@@ -508,6 +413,50 @@ mod tests {
                 "Expected at least one selected item in sampled answer set"
             );
         }
+    }
+
+    #[test]
+    fn test_sampling_fallback_enumerates_all_answer_sets() {
+        let input = r#"
+            item(1..3).
+            1 { chosen(X) : item(X) }.
+            :- not chosen(1).
+        "#;
+
+        let program = parse_program(input).unwrap();
+
+        let all_sets = asp_evaluation(&program);
+        assert!(!all_sets.is_empty());
+
+        let samples = asp_sample(&program, 123, 10);
+        assert_eq!(samples.len(), all_sets.len());
+
+        fn canonicalize(sets: &[AnswerSet]) -> Vec<Vec<String>> {
+            let mut normalized: Vec<Vec<String>> = sets
+                .iter()
+                .map(|answer_set| {
+                    let mut atoms: Vec<String> = answer_set
+                        .atoms
+                        .iter()
+                        .map(|atom| {
+                            let mut term_strings: Vec<String> = atom
+                                .terms
+                                .iter()
+                                .map(|term| format!("{:?}", term))
+                                .collect();
+                            term_strings.sort();
+                            format!("{}:{:?}", atom.predicate.as_ref(), term_strings)
+                        })
+                        .collect();
+                    atoms.sort();
+                    atoms
+                })
+                .collect();
+            normalized.sort();
+            normalized
+        }
+
+        assert_eq!(canonicalize(&samples), canonicalize(&all_sets));
     }
 
     #[test]

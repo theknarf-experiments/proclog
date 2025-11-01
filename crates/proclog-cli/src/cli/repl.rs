@@ -124,12 +124,10 @@ impl ReplApp {
             return;
         }
 
-        if lines
-            .first()
-            .map(|line| line.starts_with("Sampled "))
-            .unwrap_or(false)
-        {
-            self.last_sample = Some(lines.clone());
+        if let Some(first) = lines.first() {
+            if first.starts_with("Sampled ") {
+                self.last_sample = Some(lines.clone());
+            }
         }
 
         match kind {
