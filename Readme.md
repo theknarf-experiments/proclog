@@ -67,8 +67,21 @@ cargo run -q -p proclog-cli -- test ./examples/01_basic_facts.pl
 
 ## Example Programs
 
-You'll find examples in the `examples/` directory.
-To run all examples you can run:
+You'll find examples in the `examples/` directory. A brief tour is available in `docs/examples_overview.md`.
+
+### Sampling examples from the CLI
+
+Use the new `run` subcommand to execute a program once or sample answer sets directly:
+
+```bash
+# enumerate all stable models
+cargo run -q -- run examples/11_loot_loadouts_asp.pl
+
+# sample three loadouts deterministically
+cargo run -q -- run --sample 3 examples/11_loot_loadouts_asp.pl
+```
+
+The `test` subcommand still evaluates embedded `#test` blocks:
 
 ```bash
 cargo run -q -p proclog-cli -- test examples/*

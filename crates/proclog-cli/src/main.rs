@@ -46,6 +46,9 @@ enum Commands {
         /// Optional sample count; when omitted, run normally without sampling
         #[arg(long = "sample", value_name = "COUNT")]
         sample: Option<usize>,
+        /// Optional seed for sampling (defaults to 0)
+        #[arg(long = "seed", value_name = "SEED")]
+        seed: Option<u64>,
         /// Program file to execute
         #[arg(value_name = "FILE", required = true)]
         file: std::path::PathBuf,
@@ -65,8 +68,8 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        Commands::Run { sample, file } => {
-            if let Err(e) = cli::run::run(&file, sample) {
+        Commands::Run { sample, seed, file } => {
+            if let Err(e) = cli::run::run(&file, sample, seed.unwrap_or(0)) {
                 eprintln!("Run failed: {}", e);
                 std::process::exit(1);
             }

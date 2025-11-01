@@ -4,7 +4,7 @@ use proclog::parser::parse_program;
 use std::fs;
 use std::path::Path;
 
-pub fn run(path: &Path, sample: Option<usize>) -> Result<(), String> {
+pub fn run(path: &Path, sample: Option<usize>, seed: u64) -> Result<(), String> {
     let content = fs::read_to_string(path)
         .map_err(|e| format!("failed to read '{}': {}", path.display(), e))?;
 
@@ -12,17 +12,21 @@ pub fn run(path: &Path, sample: Option<usize>) -> Result<(), String> {
         .map_err(|errs| format!("Parse failed with {} error(s)", errs.len()))?;
 
     match sample {
-        Some(count) => run_with_sampling(&program, count),
+        Some(count) => run_with_sampling(&program, count, seed),
         None => run_full(&program, &content),
     }
 }
 
-fn run_with_sampling(program: &proclog::ast::Program, count: usize) -> Result<(), String> {
+fn run_with_sampling(
+    program: &proclog::ast::Program,
+    count: usize,
+    seed: u64,
+) -> Result<(), String> {
     if count == 0 {
         return Err("Sample count must be greater than zero".into());
     }
 
-    let samples = asp_sample(program, 0, count);
+    let samples = asp_sample(program, seed, count);
     println!("Sampled {} answer set(s).", samples.len());
     if samples.is_empty() {
         println!("No answer sets found.");

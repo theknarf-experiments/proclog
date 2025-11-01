@@ -32,3 +32,39 @@ fn run_subcommand_with_sample_flag() {
         .success()
         .stdout(predicate::str::contains("Sampled 2 answer set"));
 }
+
+#[test]
+fn run_subcommand_supports_seed() {
+    let output_seed_1 = cli()
+        .args([
+            "run",
+            "--sample",
+            "1",
+            "--seed",
+            "1",
+            "tests/fixtures/run_sample.proclog",
+        ])
+        .output()
+        .expect("run command should execute");
+    assert!(output_seed_1.status.success());
+    let stdout_1 = String::from_utf8(output_seed_1.stdout).expect("stdout utf8");
+
+    let output_seed_2 = cli()
+        .args([
+            "run",
+            "--sample",
+            "1",
+            "--seed",
+            "2",
+            "tests/fixtures/run_sample.proclog",
+        ])
+        .output()
+        .expect("run command should execute");
+    assert!(output_seed_2.status.success());
+    let stdout_2 = String::from_utf8(output_seed_2.stdout).expect("stdout utf8");
+
+    assert_ne!(
+        stdout_1, stdout_2,
+        "different seeds should affect sampling output"
+    );
+}
