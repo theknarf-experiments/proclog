@@ -37,11 +37,50 @@ mod count_aggregate_tests {
     }
 
     #[test]
+    fn test_count_constraint_parsed_from_text() {
+        // Test: Parse and evaluate count aggregate in constraint
+        let program_text = r#"
+            item(a).
+            item(b).
+            item(c).
+
+            { selected(X) : item(X) }.
+
+            :- count { X : selected(X) } > 2.
+        "#;
+
+        let program = crate::parser::parse_program(program_text)
+            .expect("Failed to parse program with count aggregate");
+        let answer_sets = crate::asp::asp_evaluation(&program);
+
+        // Without constraint: 2^3 = 8 answer sets
+        // With constraint: eliminate those with 3 items = 7 answer sets
+        assert_eq!(
+            answer_sets.len(),
+            7,
+            "Should have 7 answer sets (all except the one with 3 selected)"
+        );
+
+        // Verify no answer set has more than 2 selected items
+        for as_set in &answer_sets {
+            let selected_count = as_set
+                .atoms
+                .iter()
+                .filter(|a| a.predicate == Intern::new("selected".to_string()))
+                .count();
+            assert!(
+                selected_count <= 2,
+                "No answer set should have more than 2 selected items"
+            );
+        }
+    }
+
+    #[test]
     fn test_count_constraint_filters_answer_sets() {
         // Test: count aggregate in constraint
         // Count number of selected items, reject if > 2
 
-        // Manually build program since parser doesn't support aggregates yet
+        // Manually build program (alternative to parsing)
         let mut program = Program::new();
 
         // Facts: item(a), item(b), item(c)

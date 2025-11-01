@@ -270,8 +270,62 @@ fn infix_comparison() -> impl Parser<char, Atom, Error = ParseError> + Clone {
         })
 }
 
-/// Parse a literal (positive or negative atom)
+/// Parse a comparison operator and return the ComparisonOp enum
+fn comparison_operator() -> impl Parser<char, ComparisonOp, Error = ParseError> + Clone {
+    choice((
+        just("<=").to(ComparisonOp::LessOrEqual),
+        just(">=").to(ComparisonOp::GreaterOrEqual),
+        just("!=").to(ComparisonOp::NotEqual),
+        just("=").to(ComparisonOp::Equal),
+        just("<").to(ComparisonOp::LessThan),
+        just(">").to(ComparisonOp::GreaterThan),
+    ))
+    .padded()
+}
+
+/// Parse a count aggregate: count { Variables : Conditions } Comparison Value
+fn count_aggregate() -> impl Parser<char, Literal, Error = ParseError> + Clone {
+    just("count")
+        .padded()
+        .ignore_then(just('{').padded())
+        .ignore_then(
+            // Parse variables (comma-separated)
+            uppercase_ident()
+                .separated_by(just(',').padded())
+                .at_least(1)
+                .map(|vars: Vec<String>| {
+                    vars.into_iter()
+                        .map(|v| Intern::new(v))
+                        .collect::<Vec<_>>()
+                }),
+        )
+        .then_ignore(just(':').padded())
+        .then(
+            // Parse condition literals (comma-separated)
+            choice((infix_comparison(), atom()))
+                .map(Literal::Positive)
+                .separated_by(just(',').padded())
+                .at_least(1),
+        )
+        .then_ignore(just('}').padded())
+        .then(comparison_operator())
+        .then(term())
+        .map(|(((variables, elements), comparison), value)| {
+            Literal::Aggregate(AggregateAtom {
+                function: AggregateFunction::Count,
+                variables,
+                elements,
+                comparison,
+                value,
+            })
+        })
+        .labelled("count aggregate")
+}
+
+/// Parse a literal (positive, negative, or aggregate)
 fn literal() -> impl Parser<char, Literal, Error = ParseError> + Clone {
+    let aggregate = count_aggregate();
+
     let negated = just("not")
         .padded()
         .ignore_then(choice((infix_comparison(), atom())))
@@ -279,8 +333,7 @@ fn literal() -> impl Parser<char, Literal, Error = ParseError> + Clone {
 
     let positive = choice((infix_comparison(), atom())).map(Literal::Positive);
 
-    negated
-        .or(positive)
+    choice((aggregate, negated, positive))
         .padded_by(spacing())
         .labelled("literal")
 }
@@ -978,6 +1031,108 @@ mod tests {
             }
             Literal::Positive(_) => panic!("Expected negative literal"),
             Literal::Aggregate(_) => panic!("Expected negative literal, got aggregate"),
+        }
+    }
+
+    // Aggregate parsing tests
+    #[test]
+    fn test_parse_count_aggregate_simple() {
+        let result = literal().parse("count { X : selected(X) } > 2");
+        assert!(result.is_ok());
+        match result.unwrap() {
+            Literal::Aggregate(agg) => {
+                assert_eq!(agg.function, AggregateFunction::Count);
+                assert_eq!(agg.variables.len(), 1);
+                assert_eq!(agg.variables[0], Intern::new("X".to_string()));
+                assert_eq!(agg.elements.len(), 1);
+                assert_eq!(agg.comparison, ComparisonOp::GreaterThan);
+                match &agg.value {
+                    Term::Constant(Value::Integer(n)) => assert_eq!(*n, 2),
+                    _ => panic!("Expected integer value"),
+                }
+            }
+            _ => panic!("Expected aggregate literal"),
+        }
+    }
+
+    #[test]
+    fn test_parse_count_aggregate_equality() {
+        let result = literal().parse("count { X : item(X) } = 5");
+        assert!(result.is_ok());
+        match result.unwrap() {
+            Literal::Aggregate(agg) => {
+                assert_eq!(agg.comparison, ComparisonOp::Equal);
+                match &agg.value {
+                    Term::Constant(Value::Integer(n)) => assert_eq!(*n, 5),
+                    _ => panic!("Expected integer value"),
+                }
+            }
+            _ => panic!("Expected aggregate literal"),
+        }
+    }
+
+    #[test]
+    fn test_parse_count_aggregate_less_equal() {
+        let result = literal().parse("count { Y : member(Y) } <= 10");
+        assert!(result.is_ok());
+        match result.unwrap() {
+            Literal::Aggregate(agg) => {
+                assert_eq!(agg.comparison, ComparisonOp::LessOrEqual);
+                assert_eq!(agg.variables[0], Intern::new("Y".to_string()));
+            }
+            _ => panic!("Expected aggregate literal"),
+        }
+    }
+
+    #[test]
+    fn test_parse_count_aggregate_multiple_conditions() {
+        let result = literal().parse("count { X : item(X), heavy(X) } < 3");
+        assert!(result.is_ok());
+        match result.unwrap() {
+            Literal::Aggregate(agg) => {
+                assert_eq!(agg.elements.len(), 2);
+                assert_eq!(agg.comparison, ComparisonOp::LessThan);
+            }
+            _ => panic!("Expected aggregate literal"),
+        }
+    }
+
+    #[test]
+    fn test_parse_constraint_with_count_aggregate() {
+        let result = parse_program(":- count { X : selected(X) } > 2.");
+        assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+        match &result.unwrap().statements[0] {
+            Statement::Constraint(constraint) => {
+                assert_eq!(constraint.body.len(), 1);
+                match &constraint.body[0] {
+                    Literal::Aggregate(agg) => {
+                        assert_eq!(agg.function, AggregateFunction::Count);
+                        assert_eq!(agg.comparison, ComparisonOp::GreaterThan);
+                    }
+                    _ => panic!("Expected aggregate in constraint body"),
+                }
+            }
+            _ => panic!("Expected constraint"),
+        }
+    }
+
+    #[test]
+    fn test_parse_rule_with_count_aggregate() {
+        let result = parse_program("valid :- count { X : item(X) } <= 5.");
+        assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+        match &result.unwrap().statements[0] {
+            Statement::Rule(rule) => {
+                assert_eq!(rule.head.predicate, Intern::new("valid".to_string()));
+                assert_eq!(rule.body.len(), 1);
+                match &rule.body[0] {
+                    Literal::Aggregate(agg) => {
+                        assert_eq!(agg.function, AggregateFunction::Count);
+                        assert_eq!(agg.comparison, ComparisonOp::LessOrEqual);
+                    }
+                    _ => panic!("Expected aggregate in rule body"),
+                }
+            }
+            _ => panic!("Expected rule"),
         }
     }
 
