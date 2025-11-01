@@ -21,7 +21,10 @@
 //! // Unsafe: bad(X) :- not good(X).  // X appears only in negation
 //! ```
 
-use crate::ast::{Atom, Literal, Rule, Symbol, Term};
+use crate::{
+    ast::{Atom, Literal, Rule, Symbol, Term},
+    builtins,
+};
 use std::collections::HashSet;
 
 /// Error indicating a rule is unsafe
@@ -60,7 +63,9 @@ pub fn check_rule_safety(rule: &Rule) -> Result<(), SafetyError> {
     let mut positive_vars = HashSet::new();
     for literal in &rule.body {
         if let Literal::Positive(atom) = literal {
-            collect_vars_from_atom(atom, &mut positive_vars);
+            if builtins::parse_builtin(atom).is_none() {
+                collect_vars_from_atom(atom, &mut positive_vars);
+            }
         }
     }
 
@@ -312,6 +317,38 @@ mod tests {
 
         let result = check_rule_safety(&rule);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_builtin_literal_does_not_ground_variables() {
+        // UNSAFE: head(X) :- X = 1.
+        let rule = make_rule(
+            make_atom("head", vec![var("X")]),
+            vec![Literal::Positive(make_atom(
+                "=",
+                vec![var("X"), Term::Constant(Value::Integer(1))],
+            ))],
+        );
+
+        let result = check_rule_safety(&rule);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_builtin_literal_after_grounding_is_safe() {
+        // SAFE: head(X) :- base(X), X = 1.
+        let rule = make_rule(
+            make_atom("head", vec![var("X")]),
+            vec![
+                Literal::Positive(make_atom("base", vec![var("X")])),
+                Literal::Positive(make_atom(
+                    "=",
+                    vec![var("X"), Term::Constant(Value::Integer(1))],
+                )),
+            ],
+        );
+
+        assert!(check_rule_safety(&rule).is_ok());
     }
 
     #[test]

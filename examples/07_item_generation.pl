@@ -34,6 +34,13 @@ item_type(ring, accessory).
 item_type(amulet, accessory).
 item_type(potion, consumable).
 
+% Character levels considered in this example
+character_level(1).
+character_level(5).
+character_level(10).
+character_level(15).
+character_level(20).
+
 % Generated items with stats
 % item(Name, Type, Rarity, Level, Power)
 item(iron_sword, sword, common, 1, 10).
@@ -81,6 +88,7 @@ usable_by(Item, Class) :-
     can_use(Class, Type).
 
 level_appropriate(Item, CharLevel) :-
+    character_level(CharLevel),
     item(Item, _, _, ItemLevel, _),
     CharLevel >= ItemLevel.
 
@@ -169,6 +177,7 @@ high_power(Item) :- item(Item, _, _, _, Power), Power >= 200.
     item(excalibur, sword, legendary, 20, 500).
 
     level_appropriate(Item, CharLevel) :-
+        character_level(CharLevel),
         item(Item, _, _, ItemLevel, _),
         CharLevel >= ItemLevel.
 
@@ -206,6 +215,7 @@ high_power(Item) :- item(Item, _, _, _, Power), Power >= 200.
         can_use(Class, Type).
 
     level_appropriate(Item, CharLevel) :-
+        character_level(CharLevel),
         item(Item, _, _, ItemLevel, _),
         CharLevel >= ItemLevel.
 

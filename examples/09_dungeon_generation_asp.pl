@@ -49,8 +49,16 @@ reachable(X2, Y2) :- reachable(X1, Y1), connected(X1, Y1, X2, Y2).
     1 { exit_room(3, 1) } 1.
 
     % Adjacent cells
-    adjacent(X1, Y, X2, Y) :- X2 = X1 + 1, Y = 1.
-    adjacent(X1, Y, X2, Y) :- X1 = X2 + 1, Y = 1.
+    adjacent(X1, Y, X2, Y) :-
+        cell(X1, Y),
+        cell(X2, Y),
+        X2 = X1 + 1,
+        Y = 1.
+    adjacent(X1, Y, X2, Y) :-
+        cell(X1, Y),
+        cell(X2, Y),
+        X1 = X2 + 1,
+        Y = 1.
 
     connected(X1, Y1, X2, Y2) :- room(X1, Y1), room(X2, Y2), adjacent(X1, Y1, X2, Y2).
 

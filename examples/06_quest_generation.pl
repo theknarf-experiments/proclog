@@ -48,6 +48,13 @@ quest_level(find_artifact, 10).
 quest_level(rescue_merchant, 8).
 quest_level(defeat_dragon, 20).
 
+% Player levels used to evaluate quest availability
+player_level(1).
+player_level(5).
+player_level(8).
+player_level(10).
+player_level(20).
+
 % Quest prerequisites
 requires_quest(defeat_wolves, gather_herbs).
 requires_quest(find_artifact, defeat_wolves).
@@ -71,6 +78,7 @@ quest_reward(defeat_dragon, 2000).
 available_at_level(Quest, Level) :-
     quest(Quest),
     quest_level(Quest, Required),
+    player_level(Level),
     Level >= Required.
 
 % Transitive quest requirements
@@ -107,7 +115,11 @@ quest_chain_for(FinalQuest, Quest) :-
     quest_level(gather_herbs, 1).
     quest_level(defeat_dragon, 20).
 
-    available_at_level(Quest, Level) :- quest(Quest), quest_level(Quest, Req), Level >= Req.
+    available_at_level(Quest, Level) :-
+        quest(Quest),
+        quest_level(Quest, Req),
+        player_level(Level),
+        Level >= Req.
 
     % Level 1 can do gather_herbs
     ?- available_at_level(gather_herbs, 1).
@@ -258,10 +270,21 @@ quest_chain_for(FinalQuest, Quest) :-
     quest_reward(q2, 500).
     quest_reward(q3, 1000).
 
+    reward_amount(100).
+    reward_amount(500).
+    reward_amount(600).
+    reward_amount(1000).
+    reward_amount(1100).
+    reward_amount(1500).
+
     requires_quest(q2, q1).
     requires_quest(q3, q2).
 
-    available_at_level(Quest, Level) :- quest(Quest), quest_level(Quest, Req), Level >= Req.
+    available_at_level(Quest, Level) :-
+        quest(Quest),
+        quest_level(Quest, Req),
+        player_level(Level),
+        Level >= Req.
     requires_completed(Quest, Prereq) :- requires_quest(Quest, Prereq).
     requires_completed(Quest, Prereq) :-
         requires_quest(Quest, Int),
@@ -271,6 +294,7 @@ quest_chain_for(FinalQuest, Quest) :-
         quest_reward(Quest, R1),
         requires_completed(Quest, Prereq1),
         quest_reward(Prereq1, R2),
+        reward_amount(Total),
         Total = R1 + R2.
 
     % Level checks
