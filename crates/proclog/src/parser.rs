@@ -963,6 +963,7 @@ mod tests {
                 assert_eq!(atom.terms.len(), 2);
             }
             Literal::Negative(_) => panic!("Expected positive literal"),
+            Literal::Aggregate(_) => panic!("Expected positive literal, got aggregate"),
         }
     }
 
@@ -976,6 +977,7 @@ mod tests {
                 assert_eq!(atom.terms.len(), 2);
             }
             Literal::Positive(_) => panic!("Expected negative literal"),
+            Literal::Aggregate(_) => panic!("Expected negative literal, got aggregate"),
         }
     }
 

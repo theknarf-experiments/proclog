@@ -12,6 +12,8 @@ pub mod stratification;
 pub mod unification;
 
 #[cfg(test)]
+mod aggregate_tests;
+#[cfg(test)]
 mod arithmetic_integration_tests;
 #[cfg(test)]
 mod asp_multiple_choice_tests;

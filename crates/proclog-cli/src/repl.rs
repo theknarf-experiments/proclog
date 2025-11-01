@@ -378,6 +378,9 @@ impl ReplEngine {
                                             const_env.substitute_atom(atom),
                                         )
                                     }
+                                    proclog::ast::Literal::Aggregate(agg) => {
+                                        proclog::ast::Literal::Aggregate(agg.clone())
+                                    }
                                 })
                                 .collect();
 
@@ -610,6 +613,7 @@ fn substitute_literal(env: &ConstantEnv, literal: &Literal) -> Literal {
     match literal {
         Literal::Positive(atom) => Literal::Positive(env.substitute_atom(atom)),
         Literal::Negative(atom) => Literal::Negative(env.substitute_atom(atom)),
+        Literal::Aggregate(agg) => Literal::Aggregate(agg.clone()),
     }
 }
 

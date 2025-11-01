@@ -138,6 +138,19 @@ fn build_dependency_graph(rules: &[Rule]) -> DependencyGraph {
                         DependencyType::Negative,
                     );
                 }
+                Literal::Aggregate(agg) => {
+                    // Aggregates create negative dependencies (like negation)
+                    // They depend on all predicates in their elements
+                    for elem_literal in &agg.elements {
+                        if let Some(atom) = elem_literal.atom() {
+                            graph.add_dependency(
+                                head_pred.clone(),
+                                atom.predicate.clone(),
+                                DependencyType::Negative,
+                            );
+                        }
+                    }
+                }
             }
         }
     }

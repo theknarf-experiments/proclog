@@ -30,7 +30,7 @@ use crate::ast::{Atom, Program, Statement, Term, Value};
 use crate::constants::ConstantEnv;
 use crate::database::FactDatabase;
 use crate::evaluation::stratified_evaluation_with_constraints;
-use rand::Rng;
+use rand::seq::index::sample;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use std::collections::HashSet;
@@ -61,11 +61,8 @@ pub fn asp_sample(program: &Program, seed: u64, sample_count: usize) -> Vec<Answ
     }
 
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
-    let mut picked = Vec::new();
-    while picked.len() < sample_count && !all_sets.is_empty() {
-        let idx = rng.gen_range(0..all_sets.len());
-        picked.push(all_sets.swap_remove(idx));
-    }
+    let indices = sample(&mut rng, all_sets.len(), sample_count).into_vec();
+    let mut picked: Vec<AnswerSet> = indices.into_iter().map(|i| all_sets[i].clone()).collect();
 
     sort_answer_sets(&mut picked);
     picked

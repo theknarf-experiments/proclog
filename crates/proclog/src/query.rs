@@ -78,10 +78,12 @@ pub fn query_variables(query: &Query) -> HashSet<Symbol> {
     }
 
     for literal in &query.body {
-        let atom = literal.atom();
-        for term in &atom.terms {
-            collect_term_vars(term, &mut vars);
+        if let Some(atom) = literal.atom() {
+            for term in &atom.terms {
+                collect_term_vars(term, &mut vars);
+            }
         }
+        // For aggregates, variables are tracked separately in the aggregate structure
     }
 
     vars

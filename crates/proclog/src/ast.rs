@@ -112,11 +112,40 @@ pub struct TestCase {
     pub negative_assertions: Vec<Atom>, // These should NOT be in results
 }
 
-/// A literal is either a positive or negative atom
+/// A literal is either a positive or negative atom, or an aggregate
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Literal {
     Positive(Atom),
     Negative(Atom),
+    Aggregate(AggregateAtom),
+}
+
+/// An aggregate literal: count { X : predicate(X) } >= 2
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AggregateAtom {
+    pub function: AggregateFunction,
+    pub variables: Vec<Symbol>,        // Variables used in aggregate (X, Y, etc.)
+    pub elements: Vec<Literal>,        // Condition literals
+    pub comparison: ComparisonOp,
+    pub value: Term,                   // Right-hand side value to compare against
+}
+
+/// Aggregate functions
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AggregateFunction {
+    Count,
+    // Future: Sum, Min, Max
+}
+
+/// Comparison operators for aggregates
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComparisonOp {
+    Equal,         // =, ==
+    NotEqual,      // !=
+    LessThan,      // <
+    LessOrEqual,   // <=
+    GreaterThan,   // >
+    GreaterOrEqual, // >=
 }
 
 /// An atom is a predicate applied to terms: `parent(john, mary)`
@@ -211,11 +240,12 @@ impl Program {
 }
 
 impl Literal {
-    /// Get the underlying atom from a literal
+    /// Get the underlying atom from a literal (None for aggregates)
     #[allow(dead_code)]
-    pub fn atom(&self) -> &Atom {
+    pub fn atom(&self) -> Option<&Atom> {
         match self {
-            Literal::Positive(atom) | Literal::Negative(atom) => atom,
+            Literal::Positive(atom) | Literal::Negative(atom) => Some(atom),
+            Literal::Aggregate(_) => None,
         }
     }
 
@@ -229,6 +259,12 @@ impl Literal {
     #[allow(dead_code)]
     pub fn is_negative(&self) -> bool {
         matches!(self, Literal::Negative(_))
+    }
+
+    /// Check if the literal is an aggregate
+    #[allow(dead_code)]
+    pub fn is_aggregate(&self) -> bool {
+        matches!(self, Literal::Aggregate(_))
     }
 }
 
@@ -271,8 +307,8 @@ mod tests {
         assert!(!pos.is_negative());
         assert!(!neg.is_positive());
         assert!(neg.is_negative());
-        assert_eq!(pos.atom(), &atom);
-        assert_eq!(neg.atom(), &atom);
+        assert_eq!(pos.atom(), Some(&atom));
+        assert_eq!(neg.atom(), Some(&atom));
     }
 
     #[test]

@@ -87,6 +87,7 @@ fn substitute_literal(const_env: &ConstantEnv, literal: &Literal) -> Literal {
     match literal {
         Literal::Positive(atom) => Literal::Positive(const_env.substitute_atom(atom)),
         Literal::Negative(atom) => Literal::Negative(const_env.substitute_atom(atom)),
+        Literal::Aggregate(agg) => Literal::Aggregate(agg.clone()),
     }
 }
 
@@ -518,6 +519,7 @@ fn derive_specialized_rule_facts(
             .map(|literal| match literal {
                 Literal::Positive(inner) => Literal::Positive(head_subst.apply_atom(inner)),
                 Literal::Negative(inner) => Literal::Negative(head_subst.apply_atom(inner)),
+                Literal::Aggregate(agg) => Literal::Aggregate(agg.clone()),
             })
             .collect();
 
@@ -619,6 +621,7 @@ fn builtin_holds(subst: &Substitution, literal: &Literal) -> bool {
     let atom = match literal {
         Literal::Positive(atom) => atom,
         Literal::Negative(_) => return false,
+        Literal::Aggregate(_) => return false,
     };
 
     let builtin = match builtins::parse_builtin(atom) {
@@ -688,6 +691,7 @@ fn should_use_rule_fallback(query: &proclog::ast::Query, rules: &[Rule]) -> bool
         let predicate = match literal {
             Literal::Positive(atom) => atom.predicate.clone(),
             Literal::Negative(_) => continue,
+            Literal::Aggregate(_) => continue,
         };
 
         let relevant_rules: Vec<&Rule> = rules
@@ -713,6 +717,7 @@ fn rule_is_recursive(rule: &Rule) -> bool {
     rule.body.iter().any(|lit| match lit {
         Literal::Positive(atom) => atom.predicate == rule.head.predicate,
         Literal::Negative(_) => false,
+        Literal::Aggregate(_) => false,
     })
 }
 
@@ -727,7 +732,7 @@ fn check_assertions(
     let substituted_query_body = substitute_literals(const_env, &test_case.query.body);
     let query_atom_for_assertions = substituted_query_body
         .get(0)
-        .map(|literal| literal.atom().clone());
+        .and_then(|literal| literal.atom().cloned());
 
     // Check positive assertions (should be in results)
     for assertion in &test_case.positive_assertions {
@@ -790,6 +795,7 @@ fn format_query(query: &proclog::ast::Query) -> String {
         .map(|lit| match lit {
             Literal::Positive(atom) => format!("{:?}", atom.predicate),
             Literal::Negative(atom) => format!("not {:?}", atom.predicate),
+            Literal::Aggregate(_) => "<aggregate>".to_string(),
         })
         .collect();
     format!("?- {}.", literals.join(", "))
@@ -1304,6 +1310,7 @@ mod tests {
                             Literal::Negative(atom) => {
                                 Literal::Negative(const_env.substitute_atom(atom))
                             }
+                            Literal::Aggregate(agg) => Literal::Aggregate(agg.clone()),
                         })
                         .collect();
                     rules_vec.push(Rule { head, body });

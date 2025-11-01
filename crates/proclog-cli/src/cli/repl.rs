@@ -689,4 +689,20 @@ mod tests {
             "scroll should not decrease when pressing down"
         );
     }
+
+    #[test]
+    fn ctrl_w_with_arrow_keys_moves_focus() {
+        let mut app = ReplApp::new(ReplEngine::new());
+        app.handle_key(ctrl_w());
+        app.handle_key(key(KeyCode::Right));
+        assert_eq!(app.active_pane(), ActivePane::Database);
+
+        app.handle_key(ctrl_w());
+        app.handle_key(key(KeyCode::Down));
+        assert_eq!(app.active_pane(), ActivePane::Stats);
+
+        app.handle_key(ctrl_w());
+        app.handle_key(key(KeyCode::Left));
+        assert_eq!(app.active_pane(), ActivePane::History);
+    }
 }

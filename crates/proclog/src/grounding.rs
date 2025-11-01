@@ -19,7 +19,7 @@
 //! let groundings = ground_rule(&rule, &db, &const_env);
 //! ```
 
-use crate::ast::{Atom, ChoiceElement, ChoiceRule, Literal, Rule, Term, Value};
+use crate::ast::{AggregateAtom, Atom, ChoiceElement, ChoiceRule, Literal, Rule, Term, Value};
 use crate::builtins;
 use crate::constants::ConstantEnv;
 use crate::database::FactDatabase;
@@ -194,6 +194,18 @@ where
 
             result
         }
+        Literal::Aggregate(_) => {
+            // Aggregates are filters - evaluate after rest of body
+            // For now, just pass through (evaluation happens during constraint checking)
+            satisfy_body_with_selector_recursive(
+                body,
+                full_db,
+                delta,
+                selector,
+                index + 1,
+                current_subst,
+            )
+        }
     }
 }
 
@@ -202,6 +214,21 @@ fn apply_subst_to_literal(subst: &Substitution, literal: &Literal) -> Literal {
     match literal {
         Literal::Positive(atom) => Literal::Positive(subst.apply_atom(atom)),
         Literal::Negative(atom) => Literal::Negative(subst.apply_atom(atom)),
+        Literal::Aggregate(agg) => {
+            // Apply substitution to aggregate elements
+            let new_elements: Vec<Literal> = agg
+                .elements
+                .iter()
+                .map(|lit| apply_subst_to_literal(subst, lit))
+                .collect();
+            Literal::Aggregate(AggregateAtom {
+                function: agg.function,
+                variables: agg.variables.clone(),
+                elements: new_elements,
+                comparison: agg.comparison,
+                value: subst.apply(&agg.value),
+            })
+        }
     }
 }
 
@@ -303,6 +330,7 @@ fn satisfy_body_mixed(
                 }
                 Literal::Positive(_) => DatabaseSelection::Delta,
                 Literal::Negative(_) => DatabaseSelection::Full,
+                Literal::Aggregate(_) => DatabaseSelection::Full,
             }
         } else {
             DatabaseSelection::Full
@@ -594,6 +622,11 @@ mod tests {
 
                     result
                 }
+            }
+            Literal::Aggregate(_) => {
+                // Aggregates are evaluated as filters after grounding
+                // Process rest of body first
+                satisfy_body_naive(rest, db)
             }
         }
     }

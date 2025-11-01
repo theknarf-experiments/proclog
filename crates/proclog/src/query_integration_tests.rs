@@ -526,6 +526,9 @@ mod query_integration_tests {
                             crate::ast::Literal::Negative(atom) => {
                                 crate::ast::Literal::Negative(const_env.substitute_atom(atom))
                             }
+                            crate::ast::Literal::Aggregate(agg) => {
+                                crate::ast::Literal::Aggregate(agg.clone())
+                            }
                         })
                         .collect();
 
@@ -589,6 +592,9 @@ mod query_integration_tests {
                             }
                             crate::ast::Literal::Negative(atom) => {
                                 crate::ast::Literal::Negative(const_env.substitute_atom(atom))
+                            }
+                            crate::ast::Literal::Aggregate(agg) => {
+                                crate::ast::Literal::Aggregate(agg.clone())
                             }
                         })
                         .collect();

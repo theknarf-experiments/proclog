@@ -20,7 +20,7 @@
 //! let result = stratified_evaluation_with_constraints(&rules, &constraints, initial_facts)?;
 //! ```
 
-use crate::ast::{Constraint, Rule};
+use crate::ast::{ComparisonOp, Constraint, Rule, Value};
 use crate::database::{FactDatabase, InsertError};
 use crate::grounding::{ground_rule, ground_rule_semi_naive, satisfy_body};
 use crate::safety::{check_program_safety, SafetyError};
@@ -298,12 +298,80 @@ pub fn check_constraints(
     constraints: &[Constraint],
     db: &FactDatabase,
 ) -> Result<(), EvaluationError> {
+    use crate::ast::Literal;
+
     for constraint in constraints {
-        let violations = satisfy_body(&constraint.body, db);
-        if !violations.is_empty() {
+        // Separate aggregates from other literals
+        let non_agg_literals: Vec<_> = constraint.body
+            .iter()
+            .filter(|lit| !lit.is_aggregate())
+            .cloned()
+            .collect();
+
+        let agg_literals: Vec<_> = constraint.body
+            .iter()
+            .filter_map(|lit| {
+                if let Literal::Aggregate(agg) = lit {
+                    Some(agg)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Get all substitutions that satisfy non-aggregate literals
+        let violations = satisfy_body(&non_agg_literals, db);
+
+        if violations.is_empty() {
+            // No violations from non-aggregate part
+            continue;
+        }
+
+        // If there are aggregates, check if any aggregate is satisfied
+        let mut actual_violations = Vec::new();
+        for subst in &violations {
+            // Check if all aggregates are satisfied with this substitution
+            let all_aggregates_satisfied = agg_literals.iter().all(|agg| {
+                // Apply substitution to aggregate value if needed
+                let threshold = match &agg.value {
+                    crate::ast::Term::Constant(Value::Integer(n)) => *n,
+                    term => {
+                        let applied_term = subst.apply(term);
+                        match applied_term {
+                            crate::ast::Term::Constant(Value::Integer(n)) => n,
+                            _ => return false,
+                        }
+                    }
+                };
+
+                let substitutions = satisfy_body(&agg.elements, db);
+                let count = substitutions.len() as i64;
+
+                match agg.comparison {
+                    ComparisonOp::Equal => count == threshold,
+                    ComparisonOp::NotEqual => count != threshold,
+                    ComparisonOp::LessThan => count < threshold,
+                    ComparisonOp::LessOrEqual => count <= threshold,
+                    ComparisonOp::GreaterThan => count > threshold,
+                    ComparisonOp::GreaterOrEqual => count >= threshold,
+                }
+            });
+
+            if all_aggregates_satisfied {
+                actual_violations.push(subst.clone());
+            }
+        }
+
+        let final_violations = if agg_literals.is_empty() {
+            violations
+        } else {
+            actual_violations
+        };
+
+        if !final_violations.is_empty() {
             return Err(EvaluationError::ConstraintViolation {
                 constraint: format!("{:?}", constraint.body),
-                violation_count: violations.len(),
+                violation_count: final_violations.len(),
             });
         }
     }
