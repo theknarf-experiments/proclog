@@ -482,6 +482,49 @@ impl ReplEngine {
             cached_answer_sets,
         }
     }
+
+    pub fn database_view(&mut self) -> Vec<String> {
+        match self.ensure_compiled() {
+            Ok(compiled) => match &compiled.result {
+                CompiledResult::Datalog(db) => {
+                    let mut facts: Vec<String> = db
+                        .all_facts()
+                        .into_iter()
+                        .map(|atom| format_atom(atom))
+                        .collect();
+                    facts.sort();
+                    if facts.is_empty() {
+                        vec!["(no facts in current database)".into()]
+                    } else {
+                        let mut lines = Vec::with_capacity(facts.len() + 1);
+                        lines.push(format!("Facts ({})", facts.len()));
+                        lines.extend(facts.into_iter().map(|fact| format!("  {}", fact)));
+                        lines
+                    }
+                }
+                CompiledResult::Asp { answer_sets, .. } => {
+                    let mut lines = Vec::new();
+                    lines.push(format!("Cached answer sets: {}", answer_sets.len()));
+                    if answer_sets.is_empty() {
+                        lines.push("  (none)".into());
+                    } else {
+                        let limit = answer_sets.len().min(5);
+                        for (idx, answer_set) in answer_sets.iter().take(limit).enumerate() {
+                            lines.push(format_answer_set_line(idx + 1, answer_set));
+                        }
+                        if answer_sets.len() > limit {
+                            lines.push(format!(
+                                "... {} more answer set(s) cached",
+                                answer_sets.len() - limit
+                            ));
+                        }
+                    }
+                    lines
+                }
+            },
+            Err(errors) => errors,
+        }
+    }
 }
 
 enum CompiledResult {
