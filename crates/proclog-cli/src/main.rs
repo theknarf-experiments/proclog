@@ -49,6 +49,9 @@ enum Commands {
         /// Optional seed for sampling (defaults to 0)
         #[arg(long = "seed", value_name = "SEED")]
         seed: Option<u64>,
+        /// Use SAT solver backend (splr) for ASP evaluation
+        #[arg(long = "sat-solver")]
+        sat_solver: bool,
         /// Program file to execute
         #[arg(value_name = "FILE", required = true)]
         file: std::path::PathBuf,
@@ -68,8 +71,13 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        Commands::Run { sample, seed, file } => {
-            if let Err(e) = cli::run::run(&file, sample, seed.unwrap_or(0)) {
+        Commands::Run {
+            sample,
+            seed,
+            sat_solver,
+            file,
+        } => {
+            if let Err(e) = cli::run::run(&file, sample, seed.unwrap_or(0), sat_solver) {
                 eprintln!("Run failed: {}", e);
                 std::process::exit(1);
             }

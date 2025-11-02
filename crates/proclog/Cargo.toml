@@ -8,3 +8,4 @@ chumsky = { workspace = true }
 internment = { workspace = true }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
+splr = "0.17.2"

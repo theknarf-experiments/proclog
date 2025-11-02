@@ -1,10 +1,11 @@
 use crate::repl::ReplEngine;
 use proclog::asp::{asp_evaluation, asp_sample};
+use proclog::asp_sat::asp_sat_evaluation_with_grounding;
 use proclog::parser::parse_program;
 use std::fs;
 use std::path::Path;
 
-pub fn run(path: &Path, sample: Option<usize>, seed: u64) -> Result<(), String> {
+pub fn run(path: &Path, sample: Option<usize>, seed: u64, use_sat_solver: bool) -> Result<(), String> {
     let content = fs::read_to_string(path)
         .map_err(|e| format!("failed to read '{}': {}", path.display(), e))?;
 
@@ -12,8 +13,13 @@ pub fn run(path: &Path, sample: Option<usize>, seed: u64) -> Result<(), String> 
         .map_err(|errs| format!("Parse failed with {} error(s)", errs.len()))?;
 
     match sample {
-        Some(count) => run_with_sampling(&program, count, seed),
-        None => run_full(&program, &content),
+        Some(count) => {
+            if use_sat_solver {
+                return Err("Sampling is not yet supported with --sat-solver".into());
+            }
+            run_with_sampling(&program, count, seed)
+        }
+        None => run_full(&program, &content, use_sat_solver),
     }
 }
 
@@ -36,8 +42,20 @@ fn run_with_sampling(
     Ok(())
 }
 
-fn run_full(program: &proclog::ast::Program, content: &str) -> Result<(), String> {
-    let answer_sets = asp_evaluation(program);
+fn run_full(program: &proclog::ast::Program, content: &str, use_sat_solver: bool) -> Result<(), String> {
+    let answer_sets = if use_sat_solver {
+        // Convert from asp_sat::AnswerSet to asp::AnswerSet
+        let sat_answer_sets = asp_sat_evaluation_with_grounding(program);
+        sat_answer_sets
+            .into_iter()
+            .map(|as_set| proclog::asp::AnswerSet {
+                atoms: as_set.atoms,
+            })
+            .collect()
+    } else {
+        asp_evaluation(program)
+    };
+
     if !answer_sets.is_empty() {
         print_answer_sets(&answer_sets);
         return Ok(());

@@ -639,6 +639,7 @@ dependencies = [
  "internment",
  "rand",
  "rand_chacha",
+ "splr",
 ]
 
 [[package]]
@@ -861,6 +862,15 @@ name = "smallvec"
 version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
+
+[[package]]
+name = "splr"
+version = "0.17.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6c8d72268886573a95520ff76c282876c69d3776e02a0b4ac8eea2b310d69ca"
+dependencies = [
+ "bitflags 2.10.0",
+]
 
 [[package]]
 name = "stability"
