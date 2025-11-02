@@ -377,8 +377,55 @@ fn spacing() -> impl Parser<char, (), Error = ParseError> + Clone {
         .ignored()
 }
 
+/// Parse an optimization statement: #minimize { ... } or #maximize { ... }
+fn optimize_statement() -> impl Parser<char, Statement, Error = ParseError> + Clone {
+    use crate::ast::{OptimizeDirection, OptimizeStatement, OptimizeTerm};
+
+    // Parse optimization direction (#minimize or #maximize)
+    let direction = just('#')
+        .ignore_then(choice((
+            text::keyword("minimize").map(|_| OptimizeDirection::Minimize),
+            text::keyword("maximize").map(|_| OptimizeDirection::Maximize),
+        )))
+        .padded();
+
+    // Parse an optimization term: term[:condition]
+    // The term itself can be a simple term or compound (e.g., C*X)
+    let optimize_term = term()
+        .then(
+            just(':')
+                .padded()
+                .ignore_then(literal().separated_by(just(',').padded()).at_least(1))
+                .or_not(),
+        )
+        .map(|(t, condition)| OptimizeTerm {
+            weight: None, // Weight extraction from compound terms can be added later
+            term: t,
+            condition: condition.unwrap_or_default(),
+        });
+
+    // Elements inside braces, separated by semicolons
+    let elements = optimize_term
+        .separated_by(just(';').padded())
+        .at_least(1)
+        .delimited_by(just('{').padded(), just('}').padded());
+
+    direction
+        .then(elements)
+        .then_ignore(just('.').padded())
+        .map(|(direction, terms)| Statement::Optimize(OptimizeStatement { direction, terms }))
+        .labelled("optimization statement")
+}
+
 fn non_test_statement() -> impl Parser<char, Statement, Error = ParseError> + Clone {
-    choice((const_decl(), choice_rule(), constraint(), rule(), fact()))
+    choice((
+        optimize_statement(), // Try optimization statements first (starts with #)
+        const_decl(),
+        choice_rule(),
+        constraint(),
+        rule(),
+        fact(),
+    ))
 }
 
 /// Parse a fact
@@ -2248,6 +2295,75 @@ mod tests {
                 assert_eq!(test2.name, "test 2");
             }
             _ => panic!("Expected two test blocks"),
+        }
+    }
+
+    #[test]
+    fn test_parse_minimize_simple() {
+        // Test: #minimize { X : cost(X) }.
+        let result = program().parse("#minimize { X : cost(X) }.");
+        assert!(result.is_ok(), "Failed to parse minimize: {:?}", result.err());
+
+        let prog = result.unwrap();
+        assert_eq!(prog.statements.len(), 1);
+
+        match &prog.statements[0] {
+            Statement::Optimize(opt) => {
+                assert_eq!(opt.direction, OptimizeDirection::Minimize);
+                assert_eq!(opt.terms.len(), 1);
+                // Should have one term with cost(X) condition
+            }
+            _ => panic!("Expected Optimize statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_maximize_simple() {
+        // Test: #maximize { X : value(X) }.
+        let result = program().parse("#maximize { X : value(X) }.");
+        assert!(result.is_ok(), "Failed to parse maximize: {:?}", result.err());
+
+        let prog = result.unwrap();
+        assert_eq!(prog.statements.len(), 1);
+
+        match &prog.statements[0] {
+            Statement::Optimize(opt) => {
+                assert_eq!(opt.direction, OptimizeDirection::Maximize);
+                assert_eq!(opt.terms.len(), 1);
+            }
+            _ => panic!("Expected Optimize statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_minimize_with_weight() {
+        // Test: #minimize { C*X : cost(X, C) }.
+        let result = program().parse("#minimize { C*X : cost(X, C) }.");
+        assert!(result.is_ok(), "Failed to parse weighted minimize: {:?}", result.err());
+
+        let prog = result.unwrap();
+        match &prog.statements[0] {
+            Statement::Optimize(opt) => {
+                assert_eq!(opt.direction, OptimizeDirection::Minimize);
+                // Should have weighted term
+            }
+            _ => panic!("Expected Optimize statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_minimize_integer() {
+        // Test: #minimize { 5 }.
+        let result = program().parse("#minimize { 5 }.");
+        assert!(result.is_ok(), "Failed to parse integer minimize: {:?}", result.err());
+
+        let prog = result.unwrap();
+        match &prog.statements[0] {
+            Statement::Optimize(opt) => {
+                assert_eq!(opt.direction, OptimizeDirection::Minimize);
+                assert_eq!(opt.terms.len(), 1);
+            }
+            _ => panic!("Expected Optimize statement"),
         }
     }
 }

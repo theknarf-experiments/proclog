@@ -7,7 +7,6 @@
 //! Therefore, this solver builds up clauses first, then creates the splr solver.
 
 use crate::ast::*;
-use internment::Intern;
 use splr::*;
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -36,7 +35,7 @@ impl AspSatSolver {
     }
 
     /// Get or create a SAT variable for an ASP atom
-    fn get_or_create_var(&mut self, atom: &Atom) -> i32 {
+    pub fn get_or_create_var(&mut self, atom: &Atom) -> i32 {
         if let Some(&var) = self.atom_to_var.get(atom) {
             return var;
         }
@@ -53,6 +52,20 @@ impl AspSatSolver {
     pub fn add_fact(&mut self, atom: &Atom) {
         let var = self.get_or_create_var(atom);
         self.clauses.push(vec![var]);
+    }
+
+    /// Add a constraint that an atom must be false (for Closed World Assumption)
+    pub fn add_must_be_false(&mut self, atom: &Atom) {
+        let var = self.get_or_create_var(atom);
+        self.clauses.push(vec![-var]);
+    }
+
+    /// Add a tautology clause for a choice atom to register it with the SAT solver
+    /// This adds "atom OR NOT atom" which is always true but ensures the variable appears in the model
+    pub fn add_tautology_for_choice(&mut self, atom: &Atom) {
+        let var = self.get_or_create_var(atom);
+        // Add clause: var OR NOT var (always true, but registers the variable)
+        self.clauses.push(vec![var, -var]);
     }
 
     /// Add a constraint (body implies false, i.e., NOT body)
@@ -100,6 +113,186 @@ impl AspSatSolver {
         // Which is: NOT head OR body1, NOT head OR body2, ...
         // But this is only needed for full Clark completion
         // For now, implementing basic rule translation
+    }
+
+    /// Add a rule with negation and Clark completion
+    /// For rule "head :- pos1, pos2, not neg1, not neg2", add:
+    /// 1. head OR NOT pos1 OR NOT pos2 OR neg1 OR neg2
+    ///    (if body is satisfied, head must be true)
+    /// 2. NOT head OR pos1, NOT head OR pos2, NOT head OR NOT neg1, NOT head OR NOT neg2
+    ///    (if head is true, body must be satisfied - Clark completion)
+    pub fn add_rule_with_negation(
+        &mut self,
+        head: &Atom,
+        positive_body: &[Atom],
+        negative_body: &[Atom],
+    ) {
+        let head_var = self.get_or_create_var(head);
+
+        if positive_body.is_empty() && negative_body.is_empty() {
+            // Fact: head is true
+            self.clauses.push(vec![head_var]);
+            return;
+        }
+
+        // Clause 1: head OR NOT pos1 OR NOT pos2 OR ... OR neg1 OR neg2 OR ...
+        // This says: if all positive literals are true AND all negative literals are false, then head must be true
+        let mut implication_clause = vec![head_var];
+
+        // Add negative literals for positive body atoms
+        for pos_atom in positive_body {
+            let pos_var = self.get_or_create_var(pos_atom);
+            implication_clause.push(-pos_var);
+        }
+
+        // Add positive literals for negative body atoms (double negation)
+        for neg_atom in negative_body {
+            let neg_var = self.get_or_create_var(neg_atom);
+            implication_clause.push(neg_var);
+        }
+
+        self.clauses.push(implication_clause);
+
+        // Clause 2: Clark completion - if head is true, body must be satisfied
+        // For positive body literals: NOT head OR pos_atom
+        for pos_atom in positive_body {
+            let pos_var = self.get_or_create_var(pos_atom);
+            self.clauses.push(vec![-head_var, pos_var]);
+        }
+
+        // For negative body literals: NOT head OR NOT neg_atom
+        for neg_atom in negative_body {
+            let neg_var = self.get_or_create_var(neg_atom);
+            self.clauses.push(vec![-head_var, -neg_var]);
+        }
+    }
+
+    /// Add cardinality constraint: at most k of the given atoms can be true
+    /// Uses sequential counter encoding for efficiency
+    pub fn add_at_most_k(&mut self, atoms: &[Atom], k: usize) {
+        if k >= atoms.len() {
+            return; // Constraint is trivially satisfied
+        }
+
+        let vars: Vec<i32> = atoms.iter().map(|a| self.get_or_create_var(a)).collect();
+
+        // For small k, use pairwise encoding
+        if k == 0 {
+            // None of the atoms can be true
+            for &var in &vars {
+                self.clauses.push(vec![-var]);
+            }
+        } else if k == 1 {
+            // At most 1: for each pair, at least one must be false
+            for i in 0..vars.len() {
+                for j in (i + 1)..vars.len() {
+                    self.clauses.push(vec![-vars[i], -vars[j]]);
+                }
+            }
+        } else {
+            // For larger k, use sequential counter encoding
+            // This is more efficient for general k
+            self.add_sequential_counter(&vars, k);
+        }
+    }
+
+    /// Add cardinality constraint: at least k of the given atoms must be true
+    pub fn add_at_least_k(&mut self, atoms: &[Atom], k: usize) {
+        if k == 0 || k > atoms.len() {
+            return; // Constraint is trivially satisfied or unsatisfiable
+        }
+
+        let vars: Vec<i32> = atoms.iter().map(|a| self.get_or_create_var(a)).collect();
+
+        // For small k, use simple encodings
+        if k == 1 {
+            // At least 1: simple OR clause
+            self.clauses.push(vars.clone());
+        } else if k == atoms.len() {
+            // All must be true
+            for &var in &vars {
+                self.clauses.push(vec![var]);
+            }
+        } else if k == atoms.len() - 1 {
+            // At least n-1: for each pair, at least one must be true
+            for i in 0..vars.len() {
+                for j in (i + 1)..vars.len() {
+                    self.clauses.push(vec![vars[i], vars[j]]);
+                }
+            }
+        } else {
+            // Use sequential counter for negation: at-most (n-k) are false
+            let neg_vars: Vec<i32> = vars.iter().map(|&v| -v).collect();
+            self.add_sequential_counter(&neg_vars, atoms.len() - k);
+        }
+    }
+
+    /// Sequential counter encoding for at-most-k constraint
+    /// This introduces auxiliary variables to count true literals
+    fn add_sequential_counter(&mut self, vars: &[i32], k: usize) {
+        let n = vars.len();
+        if n <= k {
+            return;
+        }
+
+        // Create auxiliary variables s[i][j] meaning "at least j+1 of first i vars are true"
+        let mut aux_vars: Vec<Vec<i32>> = Vec::new();
+
+        for _i in 0..n {
+            let mut row = Vec::new();
+            for _j in 0..k {
+                let aux_var = self.next_var;
+                self.next_var += 1;
+                row.push(aux_var);
+            }
+            aux_vars.push(row);
+        }
+
+        // Add clauses for the encoding
+        for i in 0..n {
+            for j in 0..k {
+                // If var[i] is true, then s[i][0] must be true
+                if j == 0 {
+                    self.clauses.push(vec![-vars[i], aux_vars[i][j]]);
+                }
+
+                // If s[i-1][j] and var[i] are true, then s[i][j+1] must be true
+                if i > 0 && j < k - 1 {
+                    self.clauses.push(vec![-aux_vars[i - 1][j], -vars[i], aux_vars[i][j + 1]]);
+                }
+
+                // If s[i-1][j] is true, then s[i][j] must be true
+                if i > 0 {
+                    self.clauses.push(vec![-aux_vars[i - 1][j], aux_vars[i][j]]);
+                }
+
+                // Forbid s[i][k] (can't have more than k)
+                if j == k - 1 && i == n - 1 {
+                    self.clauses.push(vec![-aux_vars[i][j]]);
+                }
+            }
+        }
+    }
+
+    /// Block a specific model by adding a clause that excludes it
+    /// This is used for incremental solving to find all models
+    pub fn block_model(&mut self, model: &HashMap<Atom, bool>) {
+        let blocking_clause: Vec<i32> = model
+            .iter()
+            .filter_map(|(atom, &value)| {
+                self.atom_to_var.get(atom).map(|&var| {
+                    if value {
+                        -var // If atom was true in model, add NOT atom to blocking clause
+                    } else {
+                        var // If atom was false in model, add atom to blocking clause
+                    }
+                })
+            })
+            .collect();
+
+        if !blocking_clause.is_empty() {
+            self.clauses.push(blocking_clause);
+        }
     }
 
     /// Solve and return a model if SAT
@@ -166,6 +359,7 @@ impl Default for AspSatSolver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use internment::Intern;
 
     fn make_atom(pred: &str, args: Vec<&str>) -> Atom {
         Atom {

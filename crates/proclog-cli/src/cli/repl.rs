@@ -188,6 +188,18 @@ impl ReplApp {
 
         lines.push(Line::default());
         lines.push(styled_line(
+            "Solver",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ));
+        lines.push(plain_line(format!(
+            "  Current: {}",
+            if stats.use_sat_solver { "sat" } else { "native" }
+        )));
+
+        lines.push(Line::default());
+        lines.push(styled_line(
             "Sampling",
             Style::default()
                 .fg(Color::Cyan)
@@ -232,6 +244,7 @@ impl ReplApp {
                 .add_modifier(Modifier::BOLD),
         ));
         lines.push(plain_line("  :sample [count] [seed]  Sample answer sets"));
+        lines.push(plain_line("  :solver <native|sat>   Switch solver backend"));
         lines.push(plain_line("  :help / :h             Show help"));
         lines.push(plain_line("  :quit / :q             Exit"));
 
@@ -411,6 +424,10 @@ impl ReplApp {
                     (
                         Style::default(),
                         "  :sample [count] [seed]  Sample answer sets",
+                    ),
+                    (
+                        Style::default(),
+                        "  :solver <native|sat>  Switch solver backend",
                     ),
                     (Style::default(), "  :quit / :q  Exit the REPL"),
                     (

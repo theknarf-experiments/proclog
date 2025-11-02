@@ -34,6 +34,9 @@ enum Commands {
         /// Watch the file(s) for changes and re-run tests automatically
         #[arg(long)]
         watch: bool,
+        /// Use SAT solver backend (splr) for ASP evaluation
+        #[arg(long = "sat-solver")]
+        sat_solver: bool,
     },
     /// Start the interactive ProcLog REPL
     Repl {
@@ -62,8 +65,8 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Test { files, watch } => {
-            cli::test::run(&files, watch);
+        Commands::Test { files, watch, sat_solver } => {
+            cli::test::run(&files, watch, sat_solver);
         }
         Commands::Repl { input } => {
             if let Err(e) = cli::repl::run(input.as_deref()) {

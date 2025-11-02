@@ -26,10 +26,13 @@
 //! }
 //! ```
 
-use crate::ast::{Atom, Program, Statement, Term, Value};
+use crate::ast::{
+    Atom, OptimizeDirection, OptimizeStatement, Program, Statement, Symbol, Term, Value,
+};
 use crate::constants::ConstantEnv;
 use crate::database::FactDatabase;
 use crate::evaluation::stratified_evaluation_with_constraints;
+use crate::unification::Substitution;
 use rand::seq::index::sample;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
@@ -94,7 +97,7 @@ fn format_atom(atom: &Atom) -> String {
 ///
 /// Returns Some(i64) if the term can be resolved, None otherwise
 #[cfg_attr(not(test), allow(dead_code))]
-fn resolve_bound(bound: &Term, const_env: &ConstantEnv) -> Option<i64> {
+pub fn resolve_bound(bound: &Term, const_env: &ConstantEnv) -> Option<i64> {
     match bound {
         Term::Constant(Value::Integer(n)) => Some(*n),
         Term::Constant(Value::Atom(name)) => const_env.get_int(name),
@@ -240,9 +243,10 @@ pub fn asp_evaluation(program: &Program) -> Vec<AnswerSet> {
             Statement::ChoiceRule(choice) => {
                 choice_rules.push(choice.clone());
             }
-            Statement::ConstDecl(_) | Statement::Test(_) => {
+            Statement::ConstDecl(_) | Statement::Test(_) | Statement::Optimize(_) => {
                 // Already handled by const_env or not relevant for ASP
                 // Test blocks are handled by the test runner, not ASP evaluation
+                // Optimize statements will be handled separately after finding answer sets
             }
         }
     }
@@ -337,7 +341,197 @@ pub fn asp_evaluation(program: &Program) -> Vec<AnswerSet> {
         }
     }
 
-    answer_sets
+    // Apply optimization if present
+    apply_optimization(program, answer_sets, &const_env)
+}
+
+/// Apply optimization to filter answer sets to only optimal ones
+/// Supports lexicographic optimization (multiple criteria applied in order)
+pub fn apply_optimization(
+    program: &Program,
+    answer_sets: Vec<AnswerSet>,
+    const_env: &ConstantEnv,
+) -> Vec<AnswerSet> {
+    // Extract optimization statements
+    let optimize_statements: Vec<&OptimizeStatement> = program
+        .statements
+        .iter()
+        .filter_map(|stmt| match stmt {
+            Statement::Optimize(opt) => Some(opt),
+            _ => None,
+        })
+        .collect();
+
+    // If no optimization statements, return all answer sets
+    if optimize_statements.is_empty() {
+        return answer_sets;
+    }
+
+    // Apply optimizations lexicographically (in order)
+    let mut current_sets = answer_sets;
+
+    for opt_stmt in optimize_statements {
+        if current_sets.is_empty() {
+            return vec![];
+        }
+
+        // Evaluate each answer set for this optimization criterion
+        let evaluated: Vec<(AnswerSet, i64)> = current_sets
+            .into_iter()
+            .map(|answer_set| {
+                let value = evaluate_optimization(opt_stmt, &answer_set, const_env);
+                (answer_set, value)
+            })
+            .collect();
+
+        // Find optimal value based on direction
+        let optimal_value = match opt_stmt.direction {
+            OptimizeDirection::Minimize => evaluated.iter().map(|(_, v)| *v).min().unwrap(),
+            OptimizeDirection::Maximize => evaluated.iter().map(|(_, v)| *v).max().unwrap(),
+        };
+
+        // Keep only answer sets with optimal value for this criterion
+        current_sets = evaluated
+            .into_iter()
+            .filter(|(_, value)| *value == optimal_value)
+            .map(|(answer_set, _)| answer_set)
+            .collect();
+    }
+
+    current_sets
+}
+
+/// Evaluate an optimization statement for a given answer set
+fn evaluate_optimization(
+    opt_stmt: &OptimizeStatement,
+    answer_set: &AnswerSet,
+    const_env: &ConstantEnv,
+) -> i64 {
+    // Create a database from the answer set for querying
+    let mut answer_db = FactDatabase::new();
+    for atom in &answer_set.atoms {
+        let _ = answer_db.insert(atom.clone());
+    }
+
+    let mut total_value = 0i64;
+
+    // Sum up all optimization terms that match in the answer set
+    for opt_term in &opt_stmt.terms {
+        // Get the term value (default weight is 1)
+        let term_weight = opt_term
+            .weight
+            .as_ref()
+            .and_then(|t| extract_integer_from_term(t, const_env))
+            .unwrap_or(1);
+
+        // If there's a condition, find all substitutions that satisfy it
+        if opt_term.condition.is_empty() {
+            // No condition: just evaluate the term directly
+            if let Some(value) = extract_integer_from_term(&opt_term.term, const_env) {
+                total_value += term_weight * value;
+            }
+        } else {
+            // With condition: find all substitutions that satisfy the condition
+            let substitutions = crate::grounding::satisfy_body(&opt_term.condition, &answer_db);
+
+            for subst in substitutions {
+                // Apply substitution to the term and extract its value
+                let substituted_term = apply_substitution_to_term(&opt_term.term, &subst);
+                if let Some(value) = extract_integer_from_term(&substituted_term, const_env) {
+                    total_value += term_weight * value;
+                }
+            }
+        }
+    }
+
+    total_value
+}
+
+/// Extract an integer value from a term (if possible)
+fn extract_integer_from_term(term: &Term, const_env: &ConstantEnv) -> Option<i64> {
+    match term {
+        Term::Constant(Value::Integer(n)) => Some(*n),
+        Term::Constant(Value::Atom(name)) => {
+            // Try to resolve as a constant
+            const_env.get(name).and_then(|v| match v {
+                Value::Integer(n) => Some(*n),
+                _ => None,
+            })
+        }
+        Term::Constant(Value::Float(_))
+        | Term::Constant(Value::Boolean(_))
+        | Term::Constant(Value::String(_)) => None, // Can't extract integer from these
+        Term::Variable(_) => None, // Unbound variable, can't extract value
+        Term::Compound(functor, args) => {
+            // Handle arithmetic compound terms
+            evaluate_arithmetic_term(functor, args, const_env)
+        }
+        Term::Range(_, _) => None, // Ranges not valid for extraction
+    }
+}
+
+/// Evaluate arithmetic compound terms (e.g., *(2, 3) -> 6)
+fn evaluate_arithmetic_term(
+    functor: &Symbol,
+    args: &[Term],
+    const_env: &ConstantEnv,
+) -> Option<i64> {
+    let op = functor.as_str();
+
+    match op {
+        "*" if args.len() == 2 => {
+            let left = extract_integer_from_term(&args[0], const_env)?;
+            let right = extract_integer_from_term(&args[1], const_env)?;
+            Some(left * right)
+        }
+        "+" if args.len() == 2 => {
+            let left = extract_integer_from_term(&args[0], const_env)?;
+            let right = extract_integer_from_term(&args[1], const_env)?;
+            Some(left + right)
+        }
+        "-" if args.len() == 2 => {
+            let left = extract_integer_from_term(&args[0], const_env)?;
+            let right = extract_integer_from_term(&args[1], const_env)?;
+            Some(left - right)
+        }
+        "/" if args.len() == 2 => {
+            let left = extract_integer_from_term(&args[0], const_env)?;
+            let right = extract_integer_from_term(&args[1], const_env)?;
+            if right != 0 {
+                Some(left / right)
+            } else {
+                None // Division by zero
+            }
+        }
+        _ => None, // Unknown operator or wrong arity
+    }
+}
+
+/// Apply a substitution to a term
+fn apply_substitution_to_term(term: &Term, subst: &Substitution) -> Term {
+    match term {
+        Term::Variable(var) => {
+            // Look up variable in substitution
+            if let Some(value) = subst.get(var) {
+                value.clone()
+            } else {
+                term.clone()
+            }
+        }
+        Term::Constant(_) => term.clone(),
+        Term::Compound(functor, args) => {
+            let substituted_args: Vec<Term> = args
+                .iter()
+                .map(|arg| apply_substitution_to_term(arg, subst))
+                .collect();
+            Term::Compound(functor.clone(), substituted_args)
+        }
+        Term::Range(start, end) => {
+            let substituted_start = Box::new(apply_substitution_to_term(start, subst));
+            let substituted_end = Box::new(apply_substitution_to_term(end, subst));
+            Term::Range(substituted_start, substituted_end)
+        }
+    }
 }
 
 #[cfg(test)]

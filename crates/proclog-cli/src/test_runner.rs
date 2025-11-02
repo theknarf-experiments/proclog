@@ -5,6 +5,7 @@
 
 use internment::Intern;
 use proclog::asp::{asp_evaluation, AnswerSet};
+use proclog::asp_sat::asp_sat_evaluation_with_grounding;
 use proclog::ast::{
     Atom, ChoiceElement, ChoiceRule, Constraint, Literal, Rule, Statement, Symbol, Term, TestBlock,
     TestCase, Value,
@@ -131,7 +132,7 @@ fn substitute_choice_element(const_env: &ConstantEnv, element: &ChoiceElement) -
 }
 
 /// Run a test block and return results
-pub fn run_test_block(base_statements: &[Statement], test_block: &TestBlock) -> TestResult {
+pub fn run_test_block(base_statements: &[Statement], test_block: &TestBlock, use_sat_solver: bool) -> TestResult {
     let prepared = match prepare_test_environment(base_statements, test_block) {
         Ok(env) => env,
         Err(err) => {
@@ -139,7 +140,7 @@ pub fn run_test_block(base_statements: &[Statement], test_block: &TestBlock) -> 
         }
     };
 
-    let evaluation_result = evaluate_prepared_env(&prepared);
+    let evaluation_result = evaluate_prepared_env(&prepared, use_sat_solver);
 
     let answer_sets = match evaluation_result {
         Ok(answer_sets) => answer_sets,
@@ -252,10 +253,24 @@ fn prepare_test_environment(
                 // Ignore embedded test blocks when preparing execution environment
                 Ok(())
             }
+            Statement::Optimize(_) => {
+                // Optimization statements not yet supported in test runner
+                Ok(())
+            }
         }
     };
 
+    // Check if test block defines its own choice rules
+    let test_has_choice_rules = test_block.statements.iter().any(|stmt| {
+        matches!(stmt, Statement::ChoiceRule(_))
+    });
+
     for statement in base_statements {
+        // Skip choice rules from base program if test block defines its own
+        // This prevents conflicts when test overrides base choice rules
+        if test_has_choice_rules && matches!(statement, Statement::ChoiceRule(_)) {
+            continue;
+        }
         process_statement(statement)?;
     }
 
@@ -277,7 +292,7 @@ fn prepare_test_environment(
     })
 }
 
-fn evaluate_prepared_env(prepared: &PreparedTestEnv) -> Result<Vec<AnswerSet>, EvaluationError> {
+fn evaluate_prepared_env(prepared: &PreparedTestEnv, use_sat_solver: bool) -> Result<Vec<AnswerSet>, EvaluationError> {
     if prepared.has_asp_statements() {
         // Use ASP evaluation - construct program from collected components
         let mut statements = Vec::new();
@@ -303,7 +318,21 @@ fn evaluate_prepared_env(prepared: &PreparedTestEnv) -> Result<Vec<AnswerSet>, E
         }
 
         let program = proclog::ast::Program { statements };
-        Ok(asp_evaluation(&program))
+
+        if use_sat_solver {
+            // Use SAT solver backend
+            let sat_answer_sets = asp_sat_evaluation_with_grounding(&program);
+            // Convert from asp_sat::AnswerSet to asp::AnswerSet
+            Ok(sat_answer_sets
+                .into_iter()
+                .map(|as_set| AnswerSet {
+                    atoms: as_set.atoms,
+                })
+                .collect())
+        } else {
+            // Use native ASP solver
+            Ok(asp_evaluation(&program))
+        }
     } else {
         // Use regular Datalog evaluation with constraint checking
         stratified_evaluation_with_constraints(
@@ -922,7 +951,7 @@ mod tests {
         let prepared =
             prepare_test_environment(&[], test_block).expect("Environment preparation failed");
 
-        let answer_sets = evaluate_prepared_env(&prepared).expect("Evaluation failed");
+        let answer_sets = evaluate_prepared_env(&prepared, false).expect("Evaluation failed");
         assert_eq!(
             answer_sets.len(),
             1,
@@ -962,7 +991,7 @@ mod tests {
             "Choice rule should enable ASP path"
         );
 
-        let answer_sets = evaluate_prepared_env(&prepared).expect("Evaluation failed");
+        let answer_sets = evaluate_prepared_env(&prepared, false).expect("Evaluation failed");
         assert_eq!(
             answer_sets.len(),
             2,
@@ -1078,7 +1107,7 @@ mod tests {
             _ => panic!("Expected test block"),
         };
 
-        let result = run_test_block(&[], test_block);
+        let result = run_test_block(&[], test_block, false);
         assert!(result.passed, "Test should pass");
         assert_eq!(result.passed_cases, 1);
     }
@@ -1100,7 +1129,7 @@ mod tests {
             _ => panic!("Expected test block"),
         };
 
-        let result = run_test_block(&[], test_block);
+        let result = run_test_block(&[], test_block, false);
         assert!(!result.passed, "Test should fail");
         assert_eq!(result.passed_cases, 0);
     }
@@ -1123,7 +1152,7 @@ mod tests {
             _ => panic!("Expected test block"),
         };
 
-        let result = run_test_block(&[], test_block);
+        let result = run_test_block(&[], test_block, false);
         assert!(
             !result.passed,
             "Test should fail due to constraint violation"
@@ -1156,7 +1185,7 @@ mod tests {
             _ => panic!("Expected test block"),
         };
 
-        let result = run_test_block(&[], test_block);
+        let result = run_test_block(&[], test_block, false);
         assert!(
             !result.passed,
             "Test should fail due to constraint with substituted constant: {:?}",
@@ -1188,7 +1217,7 @@ mod tests {
             _ => panic!("Expected test block"),
         };
 
-        let result = run_test_block(&[], test_block);
+        let result = run_test_block(&[], test_block, false);
         assert!(
             result.passed,
             "Choice rule with constant substitution should succeed: {:?}",
@@ -1214,7 +1243,7 @@ mod tests {
             _ => panic!("Expected test block"),
         };
 
-        let result = run_test_block(&[], test_block);
+        let result = run_test_block(&[], test_block, false);
         assert!(result.passed, "Query constants should be substituted");
         assert_eq!(result.passed_cases, 1);
     }
@@ -1239,7 +1268,7 @@ mod tests {
             _ => panic!("Expected test block"),
         };
 
-        let result = run_test_block(&[], test_block);
+        let result = run_test_block(&[], test_block, false);
         assert!(result.passed, "Test should pass: {:?}", result.case_results);
     }
 
@@ -1349,7 +1378,7 @@ mod tests {
             "Derived database should contain critical(mage)"
         );
 
-        let result = run_test_block(&[], test_block);
+        let result = run_test_block(&[], test_block, false);
         assert!(
             result.passed,
             "Test block should pass: {:?}",
@@ -1380,7 +1409,7 @@ mod tests {
             _ => panic!("Expected test block"),
         };
 
-        let result = run_test_block(&[], test_block);
+        let result = run_test_block(&[], test_block, false);
         assert!(
             result.passed,
             "Choice rule body constants should be substituted: {:?}",
@@ -1406,7 +1435,7 @@ mod tests {
             _ => panic!("Expected test block"),
         };
 
-        let result = run_test_block(&[], test_block);
+        let result = run_test_block(&[], test_block, false);
         assert!(
             !result.passed,
             "Test should fail due to non-ground fact: {:?}",
@@ -1452,7 +1481,7 @@ mod tests {
         }
 
         let test_block = test_block.expect("Expected test block");
-        let result = run_test_block(&base_statements, &test_block);
+        let result = run_test_block(&base_statements, &test_block, false);
 
         assert!(
             !result.passed,
@@ -1492,7 +1521,7 @@ mod tests {
             _ => panic!("Expected test block"),
         };
 
-        let result = run_test_block(&[], test_block);
+        let result = run_test_block(&[], test_block, false);
         assert!(result.passed, "Fallback should allow rule evaluation");
         assert_eq!(result.passed_cases, 1);
     }
@@ -1519,7 +1548,7 @@ mod tests {
             _ => panic!("Expected test block"),
         };
 
-        let result = run_test_block(&[], test_block);
+        let result = run_test_block(&[], test_block, false);
         assert!(result.passed, "Fallback should handle item level checks");
         assert_eq!(result.passed_cases, 1);
     }
@@ -1545,7 +1574,7 @@ mod tests {
             _ => panic!("Expected test block"),
         };
 
-        let result = run_test_block(&[], test_block);
+        let result = run_test_block(&[], test_block, false);
         assert!(result.passed, "Fallback should handle rarity checks");
         assert_eq!(result.passed_cases, 1);
     }

@@ -4,6 +4,7 @@
 
 use crate::ast::*;
 use crate::asp_sat::*;
+use crate::parser::parse_program;
 use internment::Intern;
 
 #[cfg(test)]
@@ -860,5 +861,55 @@ mod aggregate_integration_tests {
                 "Should not carry both sword and axe"
             );
         }
+    }
+
+    #[test]
+    fn test_sat_bounded_choice_exactly_one() {
+        // TDD: Test that bounded choice rules generate correct number of answer sets
+        // Bug: `1 { a; b; c } 1` was generating invalid answer sets (0 selected, 2+ selected, duplicates)
+        let program_text = r#"
+            1 { picked_a; picked_b; picked_c } 1.
+        "#;
+
+        let program = parse_program(program_text).expect("Failed to parse program");
+        let answer_sets = asp_sat_evaluation(&program);
+
+        // Should have exactly 3 answer sets (one for each choice)
+        assert_eq!(
+            answer_sets.len(),
+            3,
+            "Expected 3 answer sets, got {}",
+            answer_sets.len()
+        );
+
+        // Each answer set should have exactly 1 picked atom
+        for (i, answer_set) in answer_sets.iter().enumerate() {
+            let picked_count = answer_set
+                .atoms
+                .iter()
+                .filter(|atom| atom.predicate.as_str().starts_with("picked_"))
+                .count();
+            assert_eq!(
+                picked_count, 1,
+                "Answer set {} should have exactly 1 picked atom, has {}",
+                i + 1,
+                picked_count
+            );
+        }
+
+        // Check that we have one of each
+        let has_a = answer_sets
+            .iter()
+            .any(|as_set| as_set.atoms.iter().any(|a| a.predicate.as_str() == "picked_a"));
+        let has_b = answer_sets
+            .iter()
+            .any(|as_set| as_set.atoms.iter().any(|a| a.predicate.as_str() == "picked_b"));
+        let has_c = answer_sets
+            .iter()
+            .any(|as_set| as_set.atoms.iter().any(|a| a.predicate.as_str() == "picked_c"));
+
+        assert!(has_a, "Missing answer set with picked_a");
+        assert!(has_b, "Missing answer set with picked_b");
+        assert!(has_c, "Missing answer set with picked_c");
     }
 }

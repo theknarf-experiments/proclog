@@ -1,5 +1,6 @@
 use chumsky::error::{Simple, SimpleReason};
 use proclog::asp::{asp_evaluation, asp_sample, AnswerSet};
+use proclog::asp_sat::asp_sat_evaluation_with_grounding;
 use proclog::ast::{
     Atom, Constraint, Literal, Program, Query, Rule, Statement, Symbol, Term, Value,
 };
@@ -56,6 +57,7 @@ pub struct ReplEngine {
     dirty: bool,
     sample_count: usize,
     sample_seed: u64,
+    use_sat_solver: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -68,6 +70,7 @@ pub struct ReplStats {
     pub sample_count: usize,
     pub sample_seed: u64,
     pub cached_answer_sets: Option<usize>,
+    pub use_sat_solver: bool,
 }
 
 impl Default for ReplEngine {
@@ -85,6 +88,21 @@ impl ReplEngine {
             dirty: false,
             sample_count: 5,
             sample_seed: 0,
+            use_sat_solver: false,
+        }
+    }
+
+    /// Get the current solver backend setting
+    #[allow(dead_code)]
+    pub fn use_sat_solver(&self) -> bool {
+        self.use_sat_solver
+    }
+
+    /// Set the solver backend
+    pub fn set_solver(&mut self, use_sat_solver: bool) {
+        if self.use_sat_solver != use_sat_solver {
+            self.use_sat_solver = use_sat_solver;
+            self.dirty = true; // Force recompilation with new solver
         }
     }
 
@@ -97,6 +115,10 @@ impl ReplEngine {
 
         if trimmed.starts_with(":sample") {
             return self.handle_sample_command(trimmed);
+        }
+
+        if trimmed.starts_with(":solver") {
+            return self.handle_solver_command(trimmed);
         }
 
         if trimmed.starts_with("?-") {
@@ -135,6 +157,10 @@ impl ReplEngine {
                             to_add.push(Statement::ChoiceRule(choice));
                         }
                         Statement::Test(_) => {
+                            summary.skipped_tests += 1;
+                        }
+                        Statement::Optimize(_) => {
+                            // Optimization statements not yet supported in REPL
                             summary.skipped_tests += 1;
                         }
                     }
@@ -248,6 +274,37 @@ impl ReplEngine {
                 }
             },
             Err(errors) => EngineResponse::error(errors),
+        }
+    }
+
+    fn handle_solver_command(&mut self, input: &str) -> EngineResponse {
+        let parts: Vec<&str> = input.split_whitespace().collect();
+
+        if parts.len() == 1 {
+            // Just ":solver" - show current solver
+            let current = if self.use_sat_solver { "sat" } else { "native" };
+            return EngineResponse::info(vec![
+                format!("Current solver: {}", current),
+                "Usage: :solver <native|sat>".to_string(),
+            ]);
+        }
+
+        if parts.len() != 2 {
+            return EngineResponse::error(vec!["Usage: :solver <native|sat>".to_string()]);
+        }
+
+        match parts[1] {
+            "native" => {
+                self.set_solver(false);
+                EngineResponse::info(vec!["Switched to native ASP solver".to_string()])
+            }
+            "sat" => {
+                self.set_solver(true);
+                EngineResponse::info(vec!["Switched to SAT solver backend (splr)".to_string()])
+            }
+            other => EngineResponse::error(vec![
+                format!("Unknown solver: '{}'. Use 'native' or 'sat'.", other),
+            ]),
         }
     }
 
@@ -404,6 +461,9 @@ impl ReplEngine {
                 Statement::Test(_) => {
                     return Err("Test blocks are not supported in the REPL.".to_string());
                 }
+                Statement::Optimize(_) => {
+                    return Err("Optimization statements are not yet supported in the REPL.".to_string());
+                }
             }
         }
 
@@ -432,7 +492,20 @@ impl ReplEngine {
             }
 
             let program = Program { statements };
-            let answer_sets = asp_evaluation(&program);
+            let answer_sets = if self.use_sat_solver {
+                // Use SAT solver backend
+                let sat_answer_sets = asp_sat_evaluation_with_grounding(&program);
+                // Convert from asp_sat::AnswerSet to asp::AnswerSet
+                sat_answer_sets
+                    .into_iter()
+                    .map(|as_set| AnswerSet {
+                        atoms: as_set.atoms,
+                    })
+                    .collect()
+            } else {
+                // Use native ASP solver
+                asp_evaluation(&program)
+            };
             CompiledResult::Asp {
                 program,
                 answer_sets,
@@ -463,6 +536,7 @@ impl ReplEngine {
                 Statement::ChoiceRule(_) => choice_rule_count += 1,
                 Statement::ConstDecl(_) => constant_count += 1,
                 Statement::Test(_) => {}
+                Statement::Optimize(_) => {}
             }
         }
 
@@ -483,6 +557,7 @@ impl ReplEngine {
             sample_count: self.sample_count,
             sample_seed: self.sample_seed,
             cached_answer_sets,
+            use_sat_solver: self.use_sat_solver,
         }
     }
 

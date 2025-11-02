@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-pub fn run(files: &[PathBuf], watch: bool) {
+pub fn run(files: &[PathBuf], watch: bool, use_sat_solver: bool) {
     if files.is_empty() {
         eprintln!("No test files provided.");
         std::process::exit(1);
@@ -47,7 +47,7 @@ pub fn run(files: &[PathBuf], watch: bool) {
 
     let mut overall_success = true;
     for (idx, file) in inputs.iter().enumerate() {
-        let success = run_tests_from_file(&file.canonical, &file.display);
+        let success = run_tests_from_file(&file.canonical, &file.display, use_sat_solver);
         overall_success &= success;
         if idx < inputs.len() - 1 {
             println!();
@@ -95,7 +95,7 @@ pub fn run(files: &[PathBuf], watch: bool) {
                             COLOR_CYAN, COLOR_RESET
                         );
                         for (idx, file) in inputs.iter().enumerate() {
-                            let _ = run_tests_from_file(&file.canonical, &file.display);
+                            let _ = run_tests_from_file(&file.canonical, &file.display, use_sat_solver);
                             if idx < inputs.len() - 1 {
                                 println!();
                             }
@@ -112,7 +112,7 @@ pub fn run(files: &[PathBuf], watch: bool) {
     }
 }
 
-fn run_tests_from_file(path: &Path, display_name: &str) -> bool {
+fn run_tests_from_file(path: &Path, display_name: &str, use_sat_solver: bool) -> bool {
     let identifier = display_name;
 
     let content = match fs::read_to_string(path) {
@@ -166,7 +166,7 @@ fn run_tests_from_file(path: &Path, display_name: &str) -> bool {
     let mut total_failed = 0usize;
 
     for test_block in &test_blocks {
-        let result = test_runner::run_test_block(&base_statements, test_block);
+        let result = test_runner::run_test_block(&base_statements, test_block, use_sat_solver);
         let color = if result.passed {
             COLOR_GREEN
         } else {

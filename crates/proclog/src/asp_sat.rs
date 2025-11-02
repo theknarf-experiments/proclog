@@ -14,7 +14,93 @@ use crate::database::FactDatabase;
 use crate::evaluation::stratified_evaluation_with_constraints;
 use crate::grounding;
 use crate::sat_solver::AspSatSolver;
+use internment::Intern;
 use std::collections::HashSet;
+
+/// Check if a rule is ground (contains no variables)
+fn rule_is_ground(rule: &Rule) -> bool {
+    fn term_is_ground(term: &Term) -> bool {
+        match term {
+            Term::Variable(_) => false,
+            Term::Constant(_) => true,
+            Term::Compound(_, terms) => terms.iter().all(term_is_ground),
+            Term::Range(start, end) => term_is_ground(start) && term_is_ground(end),
+        }
+    }
+
+    fn atom_is_ground(atom: &Atom) -> bool {
+        atom.terms.iter().all(term_is_ground)
+    }
+
+    fn literal_is_ground(lit: &Literal) -> bool {
+        match lit {
+            Literal::Positive(atom) | Literal::Negative(atom) => atom_is_ground(atom),
+            Literal::Aggregate(_) => true, // Aggregates don't affect groundness for our purposes
+        }
+    }
+
+    atom_is_ground(&rule.head) && rule.body.iter().all(literal_is_ground)
+}
+
+/// Check if a rule contains any anonymous variables (_)
+fn rule_has_anonymous_variables(rule: &Rule) -> bool {
+    fn term_has_anon(term: &Term) -> bool {
+        match term {
+            Term::Variable(var) if var.as_ref() == "_" => true,
+            Term::Compound(_, args) => args.iter().any(term_has_anon),
+            _ => false,
+        }
+    }
+
+    fn atom_has_anon(atom: &Atom) -> bool {
+        atom.terms.iter().any(term_has_anon)
+    }
+
+    fn literal_has_anon(lit: &Literal) -> bool {
+        match lit {
+            Literal::Positive(atom) | Literal::Negative(atom) => atom_has_anon(atom),
+            Literal::Aggregate(_) => false,
+        }
+    }
+
+    atom_has_anon(&rule.head) || rule.body.iter().any(literal_has_anon)
+}
+
+/// Replace anonymous variables (_) with unique named variables so they get bound during grounding
+fn replace_anonymous_variables(rule: &Rule, counter: &mut usize) -> Rule {
+    fn replace_term(term: &Term, counter: &mut usize) -> Term {
+        match term {
+            Term::Variable(var) if var.as_ref() == "_" => {
+                *counter += 1;
+                Term::Variable(Intern::new(format!("_anon{}", counter)))
+            }
+            Term::Compound(f, args) => {
+                Term::Compound(f.clone(), args.iter().map(|t| replace_term(t, counter)).collect())
+            }
+            _ => term.clone(),
+        }
+    }
+
+    fn replace_atom(atom: &Atom, counter: &mut usize) -> Atom {
+        Atom {
+            predicate: atom.predicate.clone(),
+            terms: atom.terms.iter().map(|t| replace_term(t, counter)).collect(),
+        }
+    }
+
+    fn replace_literal(lit: &Literal, counter: &mut usize) -> Literal {
+        match lit {
+            Literal::Positive(atom) => Literal::Positive(replace_atom(atom, counter)),
+            Literal::Negative(atom) => Literal::Negative(replace_atom(atom, counter)),
+            Literal::Aggregate(agg) => Literal::Aggregate(agg.clone()), // Don't modify aggregates for now
+        }
+    }
+
+    Rule {
+        head: replace_atom(&rule.head, counter),
+        body: rule.body.iter().map(|lit| replace_literal(lit, counter)).collect(),
+    }
+}
 
 /// An answer set is a stable model - a set of ground atoms
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,13 +116,36 @@ pub fn asp_sat_evaluation(program: &Program) -> Vec<AnswerSet> {
     let has_choices = has_choice_rules(program);
     let has_negation = has_negation_in_rules(program);
 
-    // For programs without choices or negation, we can use direct SAT translation
-    if !has_choices && !has_negation {
-        return evaluate_definite_program(program);
-    }
+    // Get answer sets (before optimization)
+    let answer_sets = if !has_choices && !has_negation {
+        // For programs without choices or negation, use direct SAT translation
+        evaluate_definite_program(program)
+    } else {
+        // For programs with choices/negation, use proper SAT encoding
+        evaluate_with_sat_encoding(program)
+    };
 
-    // For programs with choices/negation, use guess-and-check
-    evaluate_with_guess_and_check(program)
+    // Apply optimization if present
+    let const_env = ConstantEnv::from_program(program);
+
+    // Convert to asp::AnswerSet for optimization
+    let asp_answer_sets: Vec<crate::asp::AnswerSet> = answer_sets
+        .into_iter()
+        .map(|as_set| crate::asp::AnswerSet {
+            atoms: as_set.atoms,
+        })
+        .collect();
+
+    // Apply optimization
+    let optimized = crate::asp::apply_optimization(program, asp_answer_sets, &const_env);
+
+    // Convert back to asp_sat::AnswerSet
+    optimized
+        .into_iter()
+        .map(|as_set| AnswerSet {
+            atoms: as_set.atoms,
+        })
+        .collect()
 }
 
 /// Evaluate an ASP program with variables using grounding + SAT solver
@@ -73,19 +182,29 @@ pub fn asp_sat_evaluation_with_grounding(program: &Program) -> Vec<AnswerSet> {
             Statement::ChoiceRule(choice) => {
                 choice_rules.push(choice.clone());
             }
-            Statement::ConstDecl(_) | Statement::Test(_) => {
-                // Skip
+            Statement::ConstDecl(_) | Statement::Test(_) | Statement::Optimize(_) => {
+                // Skip - handled elsewhere or not relevant for grounding
             }
         }
     }
 
-    // Evaluate Datalog rules FIRST to derive all facts
+    // Separate rules into:
+    // 1. Definite rules (no negation) - can be pre-evaluated to derive facts
+    // 2. Non-definite rules (with negation) - must be kept as rules for guess-and-check
+    let (definite_rules, non_definite_rules): (Vec<Rule>, Vec<Rule>) = rules
+        .into_iter()
+        .partition(|rule| {
+            // A rule is definite if it has no negation in its body
+            !rule.body.iter().any(|lit| matches!(lit, Literal::Negative(_)))
+        });
+
+    // Evaluate ONLY definite rules to derive facts
     // These derived facts are needed for grounding choice rule conditions
-    let derived_db = if rules.is_empty() {
+    let derived_db = if definite_rules.is_empty() {
         base_facts.clone()
     } else {
         // Evaluate without constraints first (constraints checked later in SAT)
-        match stratified_evaluation_with_constraints(&rules, &[], base_facts.clone()) {
+        match stratified_evaluation_with_constraints(&definite_rules, &[], base_facts.clone()) {
             Ok(db) => db,
             Err(_) => return vec![], // Rules themselves inconsistent
         }
@@ -101,21 +220,30 @@ pub fn asp_sat_evaluation_with_grounding(program: &Program) -> Vec<AnswerSet> {
         }));
     }
 
+    // Preserve optimization statements (they don't need grounding)
+    for statement in &program.statements {
+        if let Statement::Optimize(opt) = statement {
+            ground_program.add_statement(Statement::Optimize(opt.clone()));
+        }
+    }
+
     // Ground all choice rules and collect choice atoms
     let mut all_choice_atoms = Vec::new();
     for choice in &choice_rules {
         let grounded_atoms = grounding::ground_choice_rule(choice, &derived_db, &const_env);
 
-        // Create individual choice rules for each grounded atom
-        // This matches the structure expected by ASP-SAT evaluation
-        for atom in &grounded_atoms {
+        // Create a single choice rule with all grounded atoms, preserving the bounds
+        if !grounded_atoms.is_empty() {
             ground_program.add_statement(Statement::ChoiceRule(ChoiceRule {
-                lower_bound: None,
-                upper_bound: None,
-                elements: vec![ChoiceElement {
-                    atom: atom.clone(),
-                    condition: vec![],
-                }],
+                lower_bound: choice.lower_bound.clone(),
+                upper_bound: choice.upper_bound.clone(),
+                elements: grounded_atoms
+                    .iter()
+                    .map(|atom| ChoiceElement {
+                        atom: atom.clone(),
+                        condition: vec![],
+                    })
+                    .collect(),
                 body: vec![],
             }));
         }
@@ -130,28 +258,79 @@ pub fn asp_sat_evaluation_with_grounding(program: &Program) -> Vec<AnswerSet> {
         let _ = extended_db.insert(atom.clone());
     }
 
-    // Ground all regular rules using the extended database
-    for rule in &rules {
-        // Find all substitutions that satisfy the body
-        let body_substs = grounding::satisfy_body(&rule.body, &extended_db);
+    // Ground all DEFINITE rules using the extended database
+    // These rules have no negation, so they can be evaluated straightforwardly by the SAT solver
+    for rule in &definite_rules {
+        // Check if the rule is propositional (has no variables)
+        let is_propositional = is_rule_propositional(rule);
 
-        // Create a ground rule for each substitution
-        for subst in body_substs {
-            let ground_head = subst.apply_atom(&rule.head);
-            let ground_body: Vec<Literal> = rule
+        if is_propositional {
+            // For propositional rules, just add them as-is without checking the database
+            ground_program.add_statement(Statement::Rule(rule.clone()));
+        } else {
+            // For rules with variables, find all substitutions from the database
+            let body_substs = grounding::satisfy_body(&rule.body, &extended_db);
+
+            for subst in body_substs {
+                let ground_head = subst.apply_atom(&rule.head);
+                let ground_body: Vec<Literal> = rule
+                    .body
+                    .iter()
+                    .map(|lit| match lit {
+                        Literal::Positive(atom) => Literal::Positive(subst.apply_atom(atom)),
+                        Literal::Negative(atom) => Literal::Negative(subst.apply_atom(atom)),
+                        Literal::Aggregate(_) => lit.clone(),
+                    })
+                    .collect();
+
+                ground_program.add_statement(Statement::Rule(Rule {
+                    head: ground_head,
+                    body: ground_body,
+                }));
+            }
+        }
+    }
+
+    // Ground all NON-DEFINITE rules using the extended database
+    // IMPORTANT: We need to ground rules WITHOUT filtering on negation of choice atoms.
+    // The negation semantics will be handled during guess-and-check.
+    for rule in &non_definite_rules {
+        // Check if the rule is propositional (has no variables)
+        let is_propositional = is_rule_propositional(rule);
+
+        if is_propositional {
+            // For propositional rules, just add them as-is without checking the database
+            ground_program.add_statement(Statement::Rule(rule.clone()));
+        } else {
+            // Find all substitutions that satisfy ONLY the positive literals in the body
+            // We extract positive literals for finding substitutions
+            let positive_lits: Vec<Literal> = rule
                 .body
                 .iter()
-                .map(|lit| match lit {
-                    Literal::Positive(atom) => Literal::Positive(subst.apply_atom(atom)),
-                    Literal::Negative(atom) => Literal::Negative(subst.apply_atom(atom)),
-                    Literal::Aggregate(_) => lit.clone(), // TODO: Handle aggregates
-                })
+                .filter(|lit| !matches!(lit, Literal::Negative(_)))
+                .cloned()
                 .collect();
 
-            ground_program.add_statement(Statement::Rule(Rule {
-                head: ground_head,
-                body: ground_body,
-            }));
+            let body_substs = grounding::satisfy_body(&positive_lits, &extended_db);
+
+            // Create a ground rule for each substitution
+            for subst in body_substs {
+                let ground_head = subst.apply_atom(&rule.head);
+                let ground_body: Vec<Literal> = rule
+                    .body
+                    .iter()
+                    .map(|lit| match lit {
+                        Literal::Positive(atom) => Literal::Positive(subst.apply_atom(atom)),
+                        Literal::Negative(atom) => Literal::Negative(subst.apply_atom(atom)),
+                        Literal::Aggregate(_) => lit.clone(), // TODO: Handle aggregates
+                    })
+                    .collect();
+
+                ground_program.add_statement(Statement::Rule(Rule {
+                    head: ground_head,
+                    body: ground_body,
+                }));
+            }
         }
     }
 
@@ -229,7 +408,7 @@ fn filter_by_aggregate_constraints(
 fn violates_aggregate_constraint(
     constraint: &Constraint,
     answer_set: &AnswerSet,
-    db: &FactDatabase,
+    _db: &FactDatabase,
 ) -> bool {
     use crate::unification::Substitution;
 
@@ -318,15 +497,363 @@ fn violates_aggregate_constraint(
     !final_violations.is_empty()
 }
 
-/// Evaluate program with choice rules and/or negation using guess-and-check
+/// Evaluate program with choice rules and/or negation using proper SAT encoding
+/// This encodes choice rules directly in SAT instead of enumerating all combinations
+fn evaluate_with_sat_encoding(program: &Program) -> Vec<AnswerSet> {
+    let mut result = Vec::new();
+    let mut solver = AspSatSolver::new();
+
+    // Get constant environment for resolving bounds
+    let const_env = ConstantEnv::from_program(program);
+
+    // Step 1: Build initial fact database (needed for grounding choice rules)
+    let mut base_facts = FactDatabase::new();
+    let mut rules = Vec::new();
+
+    for statement in &program.statements {
+        match statement {
+            Statement::Fact(fact) => {
+                // Expand ranges in facts
+                let expanded = crate::grounding::expand_atom_ranges(&fact.atom, &const_env);
+                for atom in expanded {
+                    base_facts.insert(atom).unwrap();
+                }
+            }
+            Statement::Rule(rule) => {
+                rules.push(rule.clone());
+            }
+            _ => {}
+        }
+    }
+
+    // Evaluate definite rules to get derived facts (needed for choice conditions)
+    // This is needed because choice element conditions may depend on derived facts
+    let derived_db = if rules.is_empty() {
+        base_facts.clone()
+    } else {
+        // Evaluate without constraints first (constraints checked during SAT solving)
+        match crate::evaluation::stratified_evaluation_with_constraints(&rules, &[], base_facts.clone()) {
+            Ok(db) => db,
+            Err(_) => return vec![], // Rules themselves inconsistent
+        }
+    };
+
+    // Step 1a: Ground choice rules properly using the grounding functions
+    let mut choice_rules_data: Vec<(Vec<Atom>, usize, usize)> = Vec::new(); // (atoms, min, max) for each choice rule
+
+    for statement in &program.statements {
+        if let Statement::ChoiceRule(choice_rule) = statement {
+            // Use ground_choice_rule_split to properly ground the choice rule
+            // This handles choice element conditions and body substitutions
+            let grounded_groups = crate::grounding::ground_choice_rule_split(
+                choice_rule,
+                &derived_db,
+                &const_env,
+            );
+
+            // Each group is an independent choice (one per body substitution)
+            for grounded_atoms in grounded_groups {
+                if grounded_atoms.is_empty() {
+                    continue;
+                }
+
+                let min = choice_rule
+                    .lower_bound
+                    .as_ref()
+                    .and_then(|t| crate::asp::resolve_bound(t, &const_env))
+                    .unwrap_or(0) as usize;
+
+                let max = choice_rule
+                    .upper_bound
+                    .as_ref()
+                    .and_then(|t| crate::asp::resolve_bound(t, &const_env))
+                    .map(|u| u as usize)
+                    .unwrap_or(grounded_atoms.len());
+
+                choice_rules_data.push((grounded_atoms, min, max));
+            }
+        }
+    }
+
+    // Step 2: Add all facts to the SAT solver
+    for statement in &program.statements {
+        if let Statement::Fact(fact) = statement {
+            solver.add_fact(&fact.atom);
+        }
+    }
+
+    // Step 2a: Create extended database with facts + all choice atoms
+    // This is needed to properly ground rules that reference choice atoms
+    let mut extended_db = derived_db.clone();
+    for (choice_atoms, _, _) in &choice_rules_data {
+        for atom in choice_atoms {
+            let _ = extended_db.insert(atom.clone());
+        }
+    }
+
+    // Step 3: Ground and add all rules (with negation support)
+    // Rules must be grounded against extended_db to include choice atoms
+    let mut anon_var_counter = 0;
+    for statement in &program.statements {
+        if let Statement::Rule(rule) = statement {
+            // Check if rule is already ground
+            if rule_is_ground(rule) {
+                // Already ground - add directly without grounding
+                let positive_body: Vec<Atom> = rule
+                    .body
+                    .iter()
+                    .filter_map(|lit| match lit {
+                        Literal::Positive(atom) => Some(atom.clone()),
+                        _ => None,
+                    })
+                    .collect();
+
+                let negative_body: Vec<Atom> = rule
+                    .body
+                    .iter()
+                    .filter_map(|lit| match lit {
+                        Literal::Negative(atom) => Some(atom.clone()),
+                        _ => None,
+                    })
+                    .collect();
+
+                solver.add_rule_with_negation(&rule.head, &positive_body, &negative_body);
+                continue;
+            }
+
+            // Replace anonymous variables with unique named variables so they get bound
+            // Only do this if the rule actually has anonymous variables
+            let has_anon_vars = rule_has_anonymous_variables(rule);
+            let rule_with_named_vars = if has_anon_vars {
+                replace_anonymous_variables(rule, &mut anon_var_counter)
+            } else {
+                rule.clone()
+            };
+
+            // Ground the rule against the extended database
+            let body_substs = crate::grounding::satisfy_body(&rule_with_named_vars.body, &extended_db);
+
+            for subst in body_substs {
+                let ground_head = subst.apply_atom(&rule_with_named_vars.head);
+
+                let mut positive_body = Vec::new();
+                let mut negative_body = Vec::new();
+
+                for lit in &rule_with_named_vars.body {
+                    match lit {
+                        Literal::Positive(atom) => {
+                            positive_body.push(subst.apply_atom(atom));
+                        }
+                        Literal::Negative(atom) => {
+                            negative_body.push(subst.apply_atom(atom));
+                        }
+                        Literal::Aggregate(_) => {
+                            // TODO: Handle aggregates properly
+                        }
+                    }
+                }
+
+                solver.add_rule_with_negation(&ground_head, &positive_body, &negative_body);
+            }
+        }
+    }
+
+    // Step 4: Add all constraints
+    for statement in &program.statements {
+        if let Statement::Constraint(constraint) = statement {
+            let positive_atoms: Vec<Atom> = constraint
+                .body
+                .iter()
+                .filter_map(|lit| {
+                    if let Literal::Positive(atom) = lit {
+                        Some(atom.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            solver.add_constraint(&positive_atoms);
+        }
+    }
+
+    // Step 5: Apply Closed World Assumption (CWA)
+    // Collect all atoms that can be derived (have rules/facts defining them)
+    let mut derivable_atoms: HashSet<Atom> = HashSet::new();
+
+    // Add all fact atoms
+    for statement in &program.statements {
+        if let Statement::Fact(fact) = statement {
+            derivable_atoms.insert(fact.atom.clone());
+        }
+    }
+
+    // Add all rule head atoms
+    for statement in &program.statements {
+        if let Statement::Rule(rule) = statement {
+            derivable_atoms.insert(rule.head.clone());
+        }
+    }
+
+    // Add all choice atoms (they can be true or false)
+    for (choice_atoms, _, _) in &choice_rules_data {
+        for atom in choice_atoms {
+            derivable_atoms.insert(atom.clone());
+        }
+    }
+
+    // For atoms that appear in the program but are not derivable,
+    // apply CWA: they must be false
+    // We need to get all atoms that appear anywhere in the program
+    let mut all_atoms: HashSet<Atom> = HashSet::new();
+    for statement in &program.statements {
+        match statement {
+            Statement::Fact(fact) => {
+                all_atoms.insert(fact.atom.clone());
+            }
+            Statement::Rule(rule) => {
+                all_atoms.insert(rule.head.clone());
+                for lit in &rule.body {
+                    match lit {
+                        Literal::Positive(atom) | Literal::Negative(atom) => {
+                            all_atoms.insert(atom.clone());
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Statement::Constraint(constraint) => {
+                for lit in &constraint.body {
+                    match lit {
+                        Literal::Positive(atom) | Literal::Negative(atom) => {
+                            all_atoms.insert(atom.clone());
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Atoms that are not derivable must be false (CWA)
+    for atom in &all_atoms {
+        if !derivable_atoms.contains(atom) {
+            solver.add_must_be_false(atom);
+        }
+    }
+
+    // Step 6: Ensure all choice atoms are registered and add cardinality constraints
+    for (choice_atoms, min, max) in &choice_rules_data {
+        // First, ensure all choice atoms are registered as SAT variables
+        // This is important because even without constraints, we need to track them for blocking
+        for atom in choice_atoms {
+            solver.get_or_create_var(atom);
+        }
+
+        // Add cardinality constraints if needed
+        if *min > 0 {
+            solver.add_at_least_k(choice_atoms, *min);
+        }
+        if *max < choice_atoms.len() {
+            solver.add_at_most_k(choice_atoms, *max);
+        }
+
+        // Important: If no constraints were added for this choice rule,
+        // we need to add tautology clauses to register variables with splr
+        // For each atom, add "atom OR NOT atom" which is always true
+        if *min == 0 && *max >= choice_atoms.len() {
+            for atom in choice_atoms {
+                solver.add_tautology_for_choice(atom);
+            }
+        }
+    }
+
+
+    // Step 7: Find all models using incremental SAT solving
+    const MAX_MODELS: usize = 100000; // Safety limit
+
+    loop {
+        match solver.solve() {
+            Ok(Some(model)) => {
+                // eprintln!("Debug: SAT model has {} atoms ({} true)",
+                //     model.len(),
+                //     model.values().filter(|&&v| v).count());
+
+                // Convert SAT model to answer set (only include true atoms)
+                let atoms: HashSet<Atom> = model
+                    .iter()
+                    .filter_map(|(atom, &value)| if value { Some(atom.clone()) } else { None })
+                    .collect();
+
+                result.push(AnswerSet { atoms: atoms.clone() });
+
+                if result.len() >= MAX_MODELS {
+                    eprintln!("Warning: Reached maximum of {} answer sets, stopping enumeration", MAX_MODELS);
+                    break;
+                }
+
+                // Block this model to find the next one
+                // Need to block on ALL atoms (including false ones) to distinguish models
+                solver.block_model(&model);
+            }
+            Ok(None) => {
+                // No more models
+                break;
+            }
+            Err(e) => {
+                eprintln!("SAT solver error: {:?}", e);
+                break;
+            }
+        }
+    }
+
+    result
+}
+
+/// Evaluate program with choice rules and/or negation using guess-and-check (OLD METHOD - DEPRECATED)
+/// This is the old implementation that enumerates all combinations
+/// Kept for reference but should not be used for large programs
+#[allow(dead_code)]
 fn evaluate_with_guess_and_check(program: &Program) -> Vec<AnswerSet> {
     let mut result = Vec::new();
+
+    // Extract choice rules to get atoms AND bounds
+    let choice_rules: Vec<&ChoiceRule> = program
+        .statements
+        .iter()
+        .filter_map(|stmt| match stmt {
+            Statement::ChoiceRule(cr) => Some(cr),
+            _ => None,
+        })
+        .collect();
 
     // Extract choice atoms (atoms that can be freely chosen)
     let choice_atoms = extract_choice_atoms(program);
 
-    // Generate all possible subsets of choice atoms
-    let candidates = generate_choice_subsets(&choice_atoms);
+    // Get constant environment for resolving bounds
+    let const_env = ConstantEnv::from_program(program);
+
+    // Get bounds from first choice rule (for now, assume single choice rule)
+    let (min_size, max_size) = if let Some(first_choice) = choice_rules.first() {
+        let min = first_choice
+            .lower_bound
+            .as_ref()
+            .and_then(|t| crate::asp::resolve_bound(t, &const_env))
+            .unwrap_or(0) as usize;
+        let max = first_choice
+            .upper_bound
+            .as_ref()
+            .and_then(|t| crate::asp::resolve_bound(t, &const_env))
+            .map(|u| u as usize)
+            .unwrap_or(choice_atoms.len());
+        (min, max)
+    } else {
+        (0, choice_atoms.len())
+    };
+
+    // Generate subsets that respect bounds
+    let candidates = generate_bounded_choice_subsets(&choice_atoms, min_size, max_size);
 
     // For each candidate, check if it leads to a valid answer set
     for guess in candidates {
@@ -354,12 +881,16 @@ fn extract_choice_atoms(program: &Program) -> Vec<Atom> {
     atoms
 }
 
-/// Generate all subsets of choice atoms
-fn generate_choice_subsets(atoms: &[Atom]) -> Vec<HashSet<Atom>> {
+/// Generate subsets of choice atoms that respect size bounds
+fn generate_bounded_choice_subsets(
+    atoms: &[Atom],
+    min_size: usize,
+    max_size: usize,
+) -> Vec<HashSet<Atom>> {
     let n = atoms.len();
     let mut result = Vec::new();
 
-    // Generate all 2^n subsets
+    // Generate all 2^n subsets, but only keep those within bounds
     for mask in 0..(1 << n) {
         let mut subset = HashSet::new();
         for (i, atom) in atoms.iter().enumerate() {
@@ -367,7 +898,12 @@ fn generate_choice_subsets(atoms: &[Atom]) -> Vec<HashSet<Atom>> {
                 subset.insert(atom.clone());
             }
         }
-        result.push(subset);
+
+        // Only include subsets that satisfy the bounds
+        let size = subset.len();
+        if size >= min_size && size <= max_size {
+            result.push(subset);
+        }
     }
 
     result
@@ -413,34 +949,10 @@ fn evaluate_with_guess(program: &Program, guess: &HashSet<Atom>) -> Option<Answe
                 // Handle negation in rules
                 let (positive_atoms, negative_atoms) = extract_rule_body(&rule.body);
 
-                // Check if all positive atoms are either:
-                // 1. In the guess (if they're choice atoms), OR
-                // 2. Not choice atoms (they'll be derived)
-                // If a positive atom is a choice atom NOT in the guess, skip this rule
-                let all_choice_atoms_set: HashSet<_> = all_choice_atoms.iter().cloned().collect();
-                let body_satisfied = positive_atoms.iter().all(|atom| {
-                    // If it's a choice atom, it must be in the guess
-                    // If it's not a choice atom, we'll derive it
-                    !all_choice_atoms_set.contains(atom) || guess.contains(atom)
-                });
-
-                // For negation as failure: check if negative atoms are NOT in the guess
-                let negation_satisfied = negative_atoms.iter().all(|atom| {
-                    !guess.contains(atom)
-                });
-
-                // Only add the rule if both conditions are satisfied
-                if body_satisfied && negation_satisfied {
-                    solver.add_rule(&rule.head, &positive_atoms);
-                    active_rules.insert(rule.head.clone());
-
-                    // Add "only-if" direction for single-atom bodies (simplified Clark completion)
-                    // For rule "head :- body", also add "head -> body"
-                    // This ensures head can only be true if body is true
-                    if positive_atoms.len() == 1 {
-                        solver.add_implication(&rule.head, &positive_atoms[0]);
-                    }
-                }
+                // Always add the rule with proper negation handling
+                // The SAT solver will determine if the rule fires based on the guess
+                solver.add_rule_with_negation(&rule.head, &positive_atoms, &negative_atoms);
+                active_rules.insert(rule.head.clone());
             }
             Statement::Constraint(constraint) => {
                 let (positive_atoms, _) = extract_constraint_body(&constraint.body);
@@ -449,8 +961,8 @@ fn evaluate_with_guess(program: &Program, guess: &HashSet<Atom>) -> Option<Answe
             Statement::ChoiceRule(_) => {
                 // Already handled via guess
             }
-            Statement::ConstDecl(_) | Statement::Test(_) => {
-                // Skip
+            Statement::ConstDecl(_) | Statement::Test(_) | Statement::Optimize(_) => {
+                // Skip - handled elsewhere or not relevant for SAT translation
             }
         }
     }
@@ -548,6 +1060,31 @@ fn has_negation_in_rules(program: &Program) -> bool {
     })
 }
 
+/// Check if a rule is propositional (has no variables)
+fn is_rule_propositional(rule: &Rule) -> bool {
+    fn term_is_ground(term: &Term) -> bool {
+        match term {
+            Term::Variable(_) => false,
+            Term::Constant(_) => true,
+            Term::Compound(_, terms) => terms.iter().all(term_is_ground),
+            Term::Range(start, end) => term_is_ground(start) && term_is_ground(end),
+        }
+    }
+
+    fn atom_is_ground(atom: &Atom) -> bool {
+        atom.terms.iter().all(term_is_ground)
+    }
+
+    fn literal_is_ground(lit: &Literal) -> bool {
+        match lit {
+            Literal::Positive(atom) | Literal::Negative(atom) => atom_is_ground(atom),
+            Literal::Aggregate(_) => true, // Aggregates are handled separately
+        }
+    }
+
+    atom_is_ground(&rule.head) && rule.body.iter().all(literal_is_ground)
+}
+
 /// Translate ASP program to SAT clauses using Clark completion
 fn translate_to_sat(program: &Program) -> AspSatSolver {
     let mut solver = AspSatSolver::new();
@@ -563,23 +1100,29 @@ fn translate_to_sat(program: &Program) -> AspSatSolver {
                 solver.add_fact(&fact.atom);
             }
             Statement::Rule(rule) => {
-                // Collect rules for Clark completion
-                let body_atoms: Vec<Atom> = rule
-                    .body
-                    .iter()
-                    .filter_map(|lit| {
-                        if let Literal::Positive(atom) = lit {
-                            Some(atom.clone())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
+                // Extract positive and negative body literals
+                let mut positive_body: Vec<Atom> = Vec::new();
+                let mut negative_body: Vec<Atom> = Vec::new();
 
+                for lit in &rule.body {
+                    match lit {
+                        Literal::Positive(atom) => positive_body.push(atom.clone()),
+                        Literal::Negative(atom) => negative_body.push(atom.clone()),
+                        Literal::Aggregate(_) => {
+                            // TODO: Handle aggregates in rule bodies
+                            // For now, skip them
+                        }
+                    }
+                }
+
+                // Add rule with negation support
+                solver.add_rule_with_negation(&rule.head, &positive_body, &negative_body);
+
+                // Also collect for Clark completion (only positive body for now)
                 rules_by_head
                     .entry(rule.head.clone())
                     .or_insert_with(Vec::new)
-                    .push(body_atoms);
+                    .push(positive_body);
             }
             Statement::Constraint(constraint) => {
                 let body_atoms: Vec<Atom> = constraint
@@ -607,6 +1150,10 @@ fn translate_to_sat(program: &Program) -> AspSatSolver {
             Statement::Test(_) => {
                 // Tests are not part of the logical program
                 // Skip them
+            }
+            Statement::Optimize(_) => {
+                // Optimization is handled after finding answer sets
+                // No SAT clauses needed
             }
         }
     }
@@ -645,45 +1192,10 @@ fn translate_to_sat(program: &Program) -> AspSatSolver {
     // Actually, for simplicity, let me just ensure that atoms without
     // any supporting rules are false by default.
 
-    for (head, bodies) in rules_by_head {
-        // For each rule body, add the implication: body -> head
-        // This is already handled by add_rule
-        for body in &bodies {
-            solver.add_rule(&head, body);
-        }
-
-        // Add the "only-if" direction for Clark completion
-        // h can only be true if at least one body is satisfied
-        // For a single rule h :- b1, b2:
-        //   h -> (b1 AND b2)
-        //   = NOT h OR (b1 AND b2)
-        //   = (NOT h OR b1) AND (NOT h OR b2)
-        //
-        // For multiple rules:
-        //   h :- b1.
-        //   h :- c1, c2.
-        //   h -> (b1 OR (c1 AND c2))
-        //   = NOT h OR b1 OR (c1 AND c2)
-        //
-        // This requires Tseitin transformation for proper CNF.
-        // For simplicity with single-body rules:
-        if bodies.len() == 1 {
-            let body = &bodies[0];
-            // Add: NOT head OR body_atom for each atom in body
-            for atom in body {
-                // This creates the clause: NOT head OR atom
-                // Which means: if head is true, atom must be true
-                // We can express this as a constraint when head is true but atom isn't
-                // Or add it as a special rule with head negated
-                // For now, use our solver's interface differently
-
-                // Actually, we need to add clauses manually
-                // Let me create a helper function
-            }
-        }
-        // For multiple bodies, this is more complex and requires
-        // proper CNF conversion which we'll skip for now
-    }
+    // Rules are already added with add_rule_with_negation above
+    // which handles both the implication and Clark completion
+    // The rules_by_head collection is no longer needed
+    let _ = rules_by_head;  // Suppress unused variable warning
 
     solver
 }

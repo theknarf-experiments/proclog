@@ -26,4 +26,6 @@ mod choice_constant_bounds_tests;
 #[cfg(test)]
 mod query_integration_tests;
 #[cfg(test)]
+mod optimization_tests;
+#[cfg(test)]
 mod splr_api_test;

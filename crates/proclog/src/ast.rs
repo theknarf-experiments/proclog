@@ -46,6 +46,7 @@ pub enum Statement {
     ConstDecl(ConstDecl),
     ChoiceRule(ChoiceRule),
     Test(TestBlock),
+    Optimize(OptimizeStatement),
 }
 
 /// A fact is simply an atom: `parent(john, mary).`
@@ -110,6 +111,28 @@ pub struct TestCase {
     pub query: Query,
     pub positive_assertions: Vec<Atom>, // These should be in results
     pub negative_assertions: Vec<Atom>, // These should NOT be in results
+}
+
+/// An optimization statement: `#minimize { expression }` or `#maximize { expression }`
+#[derive(Debug, Clone, PartialEq)]
+pub struct OptimizeStatement {
+    pub direction: OptimizeDirection,
+    pub terms: Vec<OptimizeTerm>, // Terms to optimize (can be weighted)
+}
+
+/// Optimization direction
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OptimizeDirection {
+    Minimize,
+    Maximize,
+}
+
+/// A term in an optimization statement with optional weight
+#[derive(Debug, Clone, PartialEq)]
+pub struct OptimizeTerm {
+    pub weight: Option<Term>, // Optional weight (defaults to 1)
+    pub term: Term,           // The term being optimized
+    pub condition: Vec<Literal>, // Optional condition
 }
 
 /// A literal is either a positive or negative atom, or an aggregate
