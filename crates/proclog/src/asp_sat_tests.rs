@@ -601,3 +601,264 @@ mod grounding_integration_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod aggregate_integration_tests {
+    use super::*;
+    use crate::asp_sat::asp_sat_evaluation_with_grounding;
+    use internment::Intern;
+
+    #[test]
+    fn test_sat_simple_count_constraint() {
+        // Test: Count aggregate in constraint
+        // Program:
+        //   item(a). item(b). item(c).
+        //   { selected(X) : item(X) }.
+        //   :- count { X : selected(X) } > 2.
+        //
+        // Should eliminate answer sets with 3 selected items
+
+        let mut program = Program::new();
+
+        // Add facts
+        for item in &["a", "b", "c"] {
+            program.add_statement(Statement::Fact(Fact {
+                atom: Atom {
+                    predicate: Intern::new("item".to_string()),
+                    terms: vec![Term::Constant(Value::Atom(Intern::new(item.to_string())))],
+                },
+            }));
+        }
+
+        // Add choice rule: { selected(X) : item(X) }
+        program.add_statement(Statement::ChoiceRule(ChoiceRule {
+            lower_bound: None,
+            upper_bound: None,
+            elements: vec![ChoiceElement {
+                atom: Atom {
+                    predicate: Intern::new("selected".to_string()),
+                    terms: vec![Term::Variable(Intern::new("X".to_string()))],
+                },
+                condition: vec![Literal::Positive(Atom {
+                    predicate: Intern::new("item".to_string()),
+                    terms: vec![Term::Variable(Intern::new("X".to_string()))],
+                })],
+            }],
+            body: vec![],
+        }));
+
+        // Add constraint: :- count { X : selected(X) } > 2
+        program.add_statement(Statement::Constraint(Constraint {
+            body: vec![Literal::Aggregate(AggregateAtom {
+                function: AggregateFunction::Count,
+                variables: vec![Intern::new("X".to_string())],
+                elements: vec![Literal::Positive(Atom {
+                    predicate: Intern::new("selected".to_string()),
+                    terms: vec![Term::Variable(Intern::new("X".to_string()))],
+                })],
+                comparison: ComparisonOp::GreaterThan,
+                value: Term::Constant(Value::Integer(2)),
+            })],
+        }));
+
+        let answer_sets = asp_sat_evaluation_with_grounding(&program);
+
+        // Without constraint: 2^3 = 8 answer sets
+        // With constraint: eliminate those with 3 items = 7 answer sets
+        assert_eq!(
+            answer_sets.len(),
+            7,
+            "Should have 7 answer sets (all except the one with 3 selected)"
+        );
+
+        // Verify no answer set has more than 2 selected items
+        for answer_set in &answer_sets {
+            let selected_count = answer_set
+                .atoms
+                .iter()
+                .filter(|a| a.predicate.as_ref() == "selected")
+                .count();
+            assert!(
+                selected_count <= 2,
+                "Answer set should not have more than 2 selected items, found {}",
+                selected_count
+            );
+        }
+    }
+
+    #[test]
+    fn test_sat_exact_count_constraint() {
+        // Test: Exact count requirement
+        // Program:
+        //   color(red). color(blue). color(green).
+        //   { picked(C) : color(C) }.
+        //   :- count { C : picked(C) } != 2.
+        //
+        // Should only allow answer sets with exactly 2 colors
+
+        let mut program = Program::new();
+
+        // Add facts
+        for color in &["red", "blue", "green"] {
+            program.add_statement(Statement::Fact(Fact {
+                atom: Atom {
+                    predicate: Intern::new("color".to_string()),
+                    terms: vec![Term::Constant(Value::Atom(Intern::new(color.to_string())))],
+                },
+            }));
+        }
+
+        // Add choice rule
+        program.add_statement(Statement::ChoiceRule(ChoiceRule {
+            lower_bound: None,
+            upper_bound: None,
+            elements: vec![ChoiceElement {
+                atom: Atom {
+                    predicate: Intern::new("picked".to_string()),
+                    terms: vec![Term::Variable(Intern::new("C".to_string()))],
+                },
+                condition: vec![Literal::Positive(Atom {
+                    predicate: Intern::new("color".to_string()),
+                    terms: vec![Term::Variable(Intern::new("C".to_string()))],
+                })],
+            }],
+            body: vec![],
+        }));
+
+        // Add constraint: must pick exactly 2
+        program.add_statement(Statement::Constraint(Constraint {
+            body: vec![Literal::Aggregate(AggregateAtom {
+                function: AggregateFunction::Count,
+                variables: vec![Intern::new("C".to_string())],
+                elements: vec![Literal::Positive(Atom {
+                    predicate: Intern::new("picked".to_string()),
+                    terms: vec![Term::Variable(Intern::new("C".to_string()))],
+                })],
+                comparison: ComparisonOp::NotEqual,
+                value: Term::Constant(Value::Integer(2)),
+            })],
+        }));
+
+        let answer_sets = asp_sat_evaluation_with_grounding(&program);
+
+        // Should have exactly C(3,2) = 3 answer sets
+        assert_eq!(
+            answer_sets.len(),
+            3,
+            "Should have exactly 3 answer sets (choose 2 from 3 colors)"
+        );
+
+        // Verify all answer sets have exactly 2 picked colors
+        for answer_set in &answer_sets {
+            let picked_count = answer_set
+                .atoms
+                .iter()
+                .filter(|a| a.predicate.as_ref() == "picked")
+                .count();
+            assert_eq!(
+                picked_count, 2,
+                "Each answer set should have exactly 2 picked colors"
+            );
+        }
+    }
+
+    #[test]
+    fn test_sat_count_with_multiple_conditions() {
+        // Test: Count with multiple conditions in aggregate
+        // Program:
+        //   weapon(sword). weapon(axe). weapon(bow).
+        //   heavy(sword). heavy(axe).
+        //   { carry(W) : weapon(W) }.
+        //   :- count { W : carry(W), heavy(W) } > 1.
+        //
+        // Cannot carry more than 1 heavy weapon
+
+        let mut program = Program::new();
+
+        // Add weapon facts
+        for weapon in &["sword", "axe", "bow"] {
+            program.add_statement(Statement::Fact(Fact {
+                atom: Atom {
+                    predicate: Intern::new("weapon".to_string()),
+                    terms: vec![Term::Constant(Value::Atom(Intern::new(weapon.to_string())))],
+                },
+            }));
+        }
+
+        // Add heavy facts
+        for heavy_weapon in &["sword", "axe"] {
+            program.add_statement(Statement::Fact(Fact {
+                atom: Atom {
+                    predicate: Intern::new("heavy".to_string()),
+                    terms: vec![Term::Constant(Value::Atom(Intern::new(heavy_weapon.to_string())))],
+                },
+            }));
+        }
+
+        // Add choice rule
+        program.add_statement(Statement::ChoiceRule(ChoiceRule {
+            lower_bound: None,
+            upper_bound: None,
+            elements: vec![ChoiceElement {
+                atom: Atom {
+                    predicate: Intern::new("carry".to_string()),
+                    terms: vec![Term::Variable(Intern::new("W".to_string()))],
+                },
+                condition: vec![Literal::Positive(Atom {
+                    predicate: Intern::new("weapon".to_string()),
+                    terms: vec![Term::Variable(Intern::new("W".to_string()))],
+                })],
+            }],
+            body: vec![],
+        }));
+
+        // Add constraint: cannot carry more than 1 heavy weapon
+        program.add_statement(Statement::Constraint(Constraint {
+            body: vec![Literal::Aggregate(AggregateAtom {
+                function: AggregateFunction::Count,
+                variables: vec![Intern::new("W".to_string())],
+                elements: vec![
+                    Literal::Positive(Atom {
+                        predicate: Intern::new("carry".to_string()),
+                        terms: vec![Term::Variable(Intern::new("W".to_string()))],
+                    }),
+                    Literal::Positive(Atom {
+                        predicate: Intern::new("heavy".to_string()),
+                        terms: vec![Term::Variable(Intern::new("W".to_string()))],
+                    }),
+                ],
+                comparison: ComparisonOp::GreaterThan,
+                value: Term::Constant(Value::Integer(1)),
+            })],
+        }));
+
+        let answer_sets = asp_sat_evaluation_with_grounding(&program);
+
+        // Should eliminate answer sets where both sword and axe are carried
+        // Without constraint: 2^3 = 8 answer sets
+        // With constraint: eliminate {sword, axe}, {sword, axe, bow} = 6 answer sets
+        assert_eq!(
+            answer_sets.len(),
+            6,
+            "Should have 6 answer sets (8 minus 2 with both heavy weapons)"
+        );
+
+        // Verify no answer set has both heavy weapons
+        for answer_set in &answer_sets {
+            let has_sword = answer_set.atoms.iter().any(|a| {
+                a.predicate.as_ref() == "carry"
+                    && a.terms.len() == 1
+                    && matches!(&a.terms[0], Term::Constant(Value::Atom(s)) if s.as_ref() == "sword")
+            });
+            let has_axe = answer_set.atoms.iter().any(|a| {
+                a.predicate.as_ref() == "carry"
+                    && a.terms.len() == 1
+                    && matches!(&a.terms[0], Term::Constant(Value::Atom(s)) if s.as_ref() == "axe")
+            });
+            assert!(
+                !(has_sword && has_axe),
+                "Should not carry both sword and axe"
+            );
+        }
+    }
+}

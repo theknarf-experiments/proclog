@@ -156,8 +156,20 @@ pub fn asp_sat_evaluation_with_grounding(program: &Program) -> Vec<AnswerSet> {
     }
 
     // Ground all constraints using the extended database
+    // Skip constraints with aggregates - they are handled separately after SAT evaluation
     for constraint in &constraints {
-        // Ground the constraint body
+        // Check if constraint contains aggregates
+        let has_aggregates = constraint
+            .body
+            .iter()
+            .any(|lit| matches!(lit, Literal::Aggregate(_)));
+
+        if has_aggregates {
+            // Aggregate constraints are handled separately after SAT evaluation
+            continue;
+        }
+
+        // Ground non-aggregate constraint body
         let body_substs = grounding::satisfy_body(&constraint.body, &extended_db);
         for subst in body_substs {
             let ground_body: Vec<Literal> = constraint
@@ -166,7 +178,7 @@ pub fn asp_sat_evaluation_with_grounding(program: &Program) -> Vec<AnswerSet> {
                 .map(|lit| match lit {
                     Literal::Positive(atom) => Literal::Positive(subst.apply_atom(atom)),
                     Literal::Negative(atom) => Literal::Negative(subst.apply_atom(atom)),
-                    Literal::Aggregate(_) => lit.clone(), // TODO: Handle aggregates
+                    Literal::Aggregate(_) => unreachable!("Should have been filtered out"),
                 })
                 .collect();
 
@@ -177,7 +189,133 @@ pub fn asp_sat_evaluation_with_grounding(program: &Program) -> Vec<AnswerSet> {
     }
 
     // Evaluate the ground program using SAT solver
-    asp_sat_evaluation(&ground_program)
+    let mut answer_sets = asp_sat_evaluation(&ground_program);
+
+    // Filter answer sets based on aggregate constraints
+    filter_by_aggregate_constraints(&mut answer_sets, &constraints, &extended_db);
+
+    answer_sets
+}
+
+/// Filter answer sets by checking aggregate constraints
+fn filter_by_aggregate_constraints(
+    answer_sets: &mut Vec<AnswerSet>,
+    constraints: &[Constraint],
+    db: &FactDatabase,
+) {
+    answer_sets.retain(|answer_set| {
+        // Check if this answer set satisfies all constraints with aggregates
+        for constraint in constraints {
+            // Check if constraint has aggregates
+            let has_aggregates = constraint
+                .body
+                .iter()
+                .any(|lit| matches!(lit, Literal::Aggregate(_)));
+
+            if !has_aggregates {
+                continue; // Non-aggregate constraints already handled by SAT
+            }
+
+            // Evaluate the constraint for this answer set
+            if violates_aggregate_constraint(constraint, answer_set, db) {
+                return false; // Filter out this answer set
+            }
+        }
+        true // Keep this answer set
+    });
+}
+
+/// Check if an answer set violates an aggregate constraint
+fn violates_aggregate_constraint(
+    constraint: &Constraint,
+    answer_set: &AnswerSet,
+    db: &FactDatabase,
+) -> bool {
+    use crate::unification::Substitution;
+
+    // Separate aggregate and non-aggregate literals
+    let agg_literals: Vec<&AggregateAtom> = constraint
+        .body
+        .iter()
+        .filter_map(|lit| {
+            if let Literal::Aggregate(agg) = lit {
+                Some(agg)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let non_agg_literals: Vec<Literal> = constraint
+        .body
+        .iter()
+        .filter(|lit| !matches!(lit, Literal::Aggregate(_)))
+        .cloned()
+        .collect();
+
+    // Create a database from ONLY the answer set atoms
+    // Don't use the extended database as it contains all possible choice atoms
+    let mut answer_db = FactDatabase::new();
+    for atom in &answer_set.atoms {
+        let _ = answer_db.insert(atom.clone());
+    }
+
+    // Get all substitutions that satisfy non-aggregate literals
+    let violations = if non_agg_literals.is_empty() {
+        vec![Substitution::new()]
+    } else {
+        grounding::satisfy_body(&non_agg_literals, &answer_db)
+    };
+
+    if violations.is_empty() {
+        // No violations from non-aggregate part
+        return false;
+    }
+
+    // Check if any aggregate is satisfied with these substitutions
+    let mut actual_violations = Vec::new();
+    for subst in &violations {
+        // Check if all aggregates are satisfied with this substitution
+        let all_aggregates_satisfied = agg_literals.iter().all(|agg| {
+            // Get threshold value
+            let threshold = match &agg.value {
+                Term::Constant(Value::Integer(n)) => *n,
+                term => {
+                    let applied_term = subst.apply(term);
+                    match applied_term {
+                        Term::Constant(Value::Integer(n)) => n,
+                        _ => return false,
+                    }
+                }
+            };
+
+            // Count substitutions that satisfy the aggregate condition
+            let substitutions = grounding::satisfy_body(&agg.elements, &answer_db);
+            let count = substitutions.len() as i64;
+
+            // Compare count against threshold
+            match agg.comparison {
+                ComparisonOp::Equal => count == threshold,
+                ComparisonOp::NotEqual => count != threshold,
+                ComparisonOp::LessThan => count < threshold,
+                ComparisonOp::LessOrEqual => count <= threshold,
+                ComparisonOp::GreaterThan => count > threshold,
+                ComparisonOp::GreaterOrEqual => count >= threshold,
+            }
+        });
+
+        if all_aggregates_satisfied {
+            actual_violations.push(subst.clone());
+        }
+    }
+
+    let final_violations = if agg_literals.is_empty() {
+        violations
+    } else {
+        actual_violations
+    };
+
+    !final_violations.is_empty()
 }
 
 /// Evaluate program with choice rules and/or negation using guess-and-check
