@@ -27,4 +27,4 @@ jobs:
           tool: just
 
       - name: Run just tests
-        run: just test-all
+        run: just
