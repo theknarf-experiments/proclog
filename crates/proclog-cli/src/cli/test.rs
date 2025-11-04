@@ -1,4 +1,4 @@
-use crate::test_runner;
+use crate::test_runner::{self, TestResultExt};
 use crate::{COLOR_CYAN, COLOR_GREEN, COLOR_RED, COLOR_RESET, COLOR_YELLOW};
 use chumsky::error::{Simple, SimpleReason};
 use notify::{recommended_watcher, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};

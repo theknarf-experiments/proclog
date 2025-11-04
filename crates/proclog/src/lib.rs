@@ -11,6 +11,7 @@ pub mod query;
 pub mod safety;
 pub mod sat_solver;
 pub mod stratification;
+pub mod test_runner;
 pub mod unification;
 
 #[cfg(test)]
