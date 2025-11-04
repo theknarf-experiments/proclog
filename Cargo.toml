@@ -2,6 +2,7 @@
 members = [
     "crates/proclog",
     "crates/proclog-cli",
+    "crates/proclog-wasm",
 ]
 resolver = "2"
 

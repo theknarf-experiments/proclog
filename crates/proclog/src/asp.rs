@@ -41,6 +41,7 @@ use std::collections::HashSet;
 /// An answer set is a stable model - a set of ground atoms
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AnswerSet {
     pub atoms: HashSet<Atom>,
 }

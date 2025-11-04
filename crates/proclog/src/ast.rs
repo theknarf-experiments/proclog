@@ -34,11 +34,13 @@ pub type Symbol = Intern<String>;
 
 /// A ProcLog program consists of facts, rules, constraints, and other statements
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Program {
     pub statements: Vec<Statement>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Statement {
     Fact(Fact),
     Rule(Rule),
@@ -51,12 +53,14 @@ pub enum Statement {
 
 /// A fact is simply an atom: `parent(john, mary).`
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Fact {
     pub atom: Atom,
 }
 
 /// A rule has a head and a body: `ancestor(X, Y) :- parent(X, Y).`
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Rule {
     pub head: Atom,
     pub body: Vec<Literal>,
@@ -64,12 +68,14 @@ pub struct Rule {
 
 /// A constraint has no head, only a body: `:- unsafe(X).`
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Constraint {
     pub body: Vec<Literal>,
 }
 
 /// A constant declaration: `#const width = 10.` or `#const pi = 3.14.` or `#const name = foo.`
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ConstDecl {
     pub name: Symbol,
     pub value: Value,
@@ -77,6 +83,7 @@ pub struct ConstDecl {
 
 /// A choice rule: `{ atom1; atom2 }` or `1 { atom1; atom2 } 3`
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ChoiceRule {
     pub lower_bound: Option<Term>, // None means 0, can be integer or constant name
     pub upper_bound: Option<Term>, // None means infinity, can be integer or constant name
@@ -86,6 +93,7 @@ pub struct ChoiceRule {
 
 /// An element in a choice rule
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ChoiceElement {
     pub atom: Atom,
     pub condition: Vec<Literal>, // Optional condition after ':'
@@ -93,12 +101,14 @@ pub struct ChoiceElement {
 
 /// A query: `?- parent(X, mary).` or `?- ancestor(X, Y), parent(Y, mary).`
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Query {
     pub body: Vec<Literal>,
 }
 
 /// A test block: `#test "name" { facts, rules, queries with assertions }`
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TestBlock {
     pub name: String,
     pub statements: Vec<Statement>, // Facts, rules, const decls for this test
@@ -107,6 +117,7 @@ pub struct TestBlock {
 
 /// A test case: query with positive and negative assertions
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TestCase {
     pub query: Query,
     pub positive_assertions: Vec<Atom>, // These should be in results
@@ -115,6 +126,7 @@ pub struct TestCase {
 
 /// An optimization statement: `#minimize { expression }` or `#maximize { expression }`
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct OptimizeStatement {
     pub direction: OptimizeDirection,
     pub terms: Vec<OptimizeTerm>, // Terms to optimize (can be weighted)
@@ -122,6 +134,7 @@ pub struct OptimizeStatement {
 
 /// Optimization direction
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum OptimizeDirection {
     Minimize,
     Maximize,
@@ -129,6 +142,7 @@ pub enum OptimizeDirection {
 
 /// A term in an optimization statement with optional weight
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct OptimizeTerm {
     pub weight: Option<Term>, // Optional weight (defaults to 1)
     pub term: Term,           // The term being optimized
@@ -137,6 +151,7 @@ pub struct OptimizeTerm {
 
 /// A literal is either a positive or negative atom, or an aggregate
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Literal {
     Positive(Atom),
     Negative(Atom),
@@ -145,6 +160,7 @@ pub enum Literal {
 
 /// An aggregate literal: count { X : predicate(X) } >= 2
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AggregateAtom {
     pub function: AggregateFunction,
     pub variables: Vec<Symbol>,        // Variables used in aggregate (X, Y, etc.)
@@ -155,6 +171,7 @@ pub struct AggregateAtom {
 
 /// Aggregate functions
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum AggregateFunction {
     Count,
     // Future: Sum, Min, Max
@@ -162,6 +179,7 @@ pub enum AggregateFunction {
 
 /// Comparison operators for aggregates
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ComparisonOp {
     Equal,         // =, ==
     NotEqual,      // !=
@@ -173,6 +191,7 @@ pub enum ComparisonOp {
 
 /// An atom is a predicate applied to terms: `parent(john, mary)`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Atom {
     pub predicate: Symbol,
     pub terms: Vec<Term>,
@@ -180,6 +199,7 @@ pub struct Atom {
 
 /// A term can be a variable, constant, compound term, or range
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Term {
     /// Variable: uppercase or starts with underscore (X, Y, _tmp)
     Variable(Symbol),
@@ -193,6 +213,7 @@ pub enum Term {
 
 /// Constant values
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Value {
     Integer(i64),
     Float(f64),

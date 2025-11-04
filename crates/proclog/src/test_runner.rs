@@ -23,6 +23,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Result of running a single test case
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TestCaseResult {
     pub passed: bool,
     pub message: String,
@@ -30,6 +31,7 @@ pub struct TestCaseResult {
 
 /// Result of running an entire test block
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TestResult {
     pub test_name: String,
     pub passed: bool,

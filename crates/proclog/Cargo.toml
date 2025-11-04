@@ -3,9 +3,14 @@ name = "proclog"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+serde = ["dep:serde", "internment/serde"]
+
 [dependencies]
 chumsky = { workspace = true }
 internment = { workspace = true }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
 splr = "0.17.2"
+serde = { version = "1.0", features = ["derive"], optional = true }
