@@ -39,3 +39,7 @@ test-all:
 # Test everything with SAT solver (may hang on some examples)
 test-all-sat:
     cargo run -q -p proclog-cli -- test --sat-solver examples/*
+
+rust-tests:
+  cargo test --locked -p proclog
+  cargo test --locked -p proclog-cli
