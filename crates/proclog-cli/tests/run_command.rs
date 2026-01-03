@@ -1,11 +1,10 @@
-use assert_cmd::cargo::cargo_bin;
 use assert_cmd::prelude::*;
 use predicates::prelude::*;
 use std::path::PathBuf;
 use std::process::Command;
 
 fn cli() -> Command {
-    Command::new(cargo_bin("proclog-cli"))
+    Command::new(assert_cmd::cargo::cargo_bin!("proclog-cli"))
 }
 
 #[test]
