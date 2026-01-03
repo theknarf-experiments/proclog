@@ -3,6 +3,7 @@ use crate::{COLOR_CYAN, COLOR_GREEN, COLOR_RED, COLOR_RESET, COLOR_YELLOW};
 use chumsky::error::{Simple, SimpleReason};
 use notify::{recommended_watcher, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use proclog::{ast, parser};
+use proclog::parser::{ParseError, Token};
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -209,7 +210,40 @@ fn run_tests_from_file(path: &Path, display_name: &str, use_sat_solver: bool) ->
     total_failed == 0
 }
 
-fn format_parse_error(file_name: &str, source: &str, error: &Simple<char>) -> String {
+fn format_parse_error(file_name: &str, source: &str, error: &ParseError) -> String {
+    match error {
+        ParseError::Lex(err) => format_char_error(file_name, source, err),
+        ParseError::Parse(err) => format_token_error(file_name, source, err),
+    }
+}
+
+fn format_char_error(file_name: &str, source: &str, error: &Simple<char>) -> String {
+    format_error_with_expected(
+        file_name,
+        source,
+        error,
+        |found| format!("Unexpected character '{}'", found),
+        |token| format!("'{}'", token),
+    )
+}
+
+fn format_token_error(file_name: &str, source: &str, error: &Simple<Token>) -> String {
+    format_error_with_expected(
+        file_name,
+        source,
+        error,
+        |found| format!("Unexpected token '{}'", found),
+        |token| format!("'{}'", token),
+    )
+}
+
+fn format_error_with_expected<T: std::fmt::Display + Clone + std::cmp::Eq + std::hash::Hash>(
+    file_name: &str,
+    source: &str,
+    error: &Simple<T>,
+    unexpected: impl Fn(&T) -> String,
+    expected_token: impl Fn(&T) -> String,
+) -> String {
     let span = error.span();
     let total_chars = source.chars().count();
 
@@ -252,7 +286,7 @@ fn format_parse_error(file_name: &str, source: &str, error: &Simple<char>) -> St
 
     let mut message = match error.reason() {
         SimpleReason::Unexpected => match error.found() {
-            Some(found) => format!("Unexpected character '{}'", found),
+            Some(found) => unexpected(found),
             None => "Unexpected end of input".to_string(),
         },
         SimpleReason::Unclosed { span: _, delimiter } => {
@@ -270,7 +304,7 @@ fn format_parse_error(file_name: &str, source: &str, error: &Simple<char>) -> St
     let expected: Vec<String> = error
         .expected()
         .filter_map(|expected| match expected {
-            Some(ch) => Some(format!("'{}'", ch)),
+            Some(token) => Some(expected_token(token)),
             None => Some("end of input".to_string()),
         })
         .collect();

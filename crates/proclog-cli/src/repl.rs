@@ -7,7 +7,7 @@ use proclog::ast::{
 use proclog::constants::ConstantEnv;
 use proclog::database::FactDatabase;
 use proclog::evaluation::stratified_evaluation_with_constraints;
-use proclog::parser::{parse_program, parse_query};
+use proclog::parser::{parse_program, parse_query, ParseError};
 use proclog::query::{evaluate_query, query_variables};
 use proclog::unification::Substitution;
 use std::collections::HashSet;
@@ -790,7 +790,7 @@ fn format_float(value: f64) -> String {
     }
 }
 
-fn format_parse_errors(input: &str, errors: Vec<Simple<char>>) -> Vec<String> {
+fn format_parse_errors(input: &str, errors: Vec<ParseError>) -> Vec<String> {
     #[derive(Clone)]
     struct LineInfo {
         number: usize,
@@ -883,12 +883,14 @@ fn format_parse_errors(input: &str, errors: Vec<Simple<char>>) -> Vec<String> {
         (start_offset, pointer_width)
     }
 
-    fn format_expected(err: &Simple<char>) -> Vec<String> {
+    fn format_expected<T: std::fmt::Display + Clone + std::cmp::Eq + std::hash::Hash>(
+        err: &Simple<T>,
+    ) -> Vec<String> {
         let mut tokens: Vec<String> = err
             .expected()
             .into_iter()
             .map(|expected| match expected {
-                Some(ch) => format!("'{}'", ch),
+                Some(token) => format!("'{}'", token),
                 None => "end of input".to_string(),
             })
             .collect();
@@ -901,47 +903,13 @@ fn format_parse_errors(input: &str, errors: Vec<Simple<char>>) -> Vec<String> {
     let mut formatted = Vec::new();
 
     for error in errors {
-        let span = error.span();
+        let (span, reason) = match &error {
+            ParseError::Lex(err) => (err.span(), format_reason(err, &format_expected(err))),
+            ParseError::Parse(err) => (err.span(), format_reason(err, &format_expected(err))),
+        };
         let line = locate_line(&lines, span.start);
         let column = char_index_to_column(line, span.start);
         let (pointer_offset, pointer_width) = pointer_line(line, &span);
-
-        let expected_tokens = format_expected(&error);
-        let reason = match error.reason() {
-            SimpleReason::Unexpected => {
-                let expected = if expected_tokens.is_empty() {
-                    None
-                } else {
-                    Some(expected_tokens.join(", "))
-                };
-                match (expected, error.found()) {
-                    (Some(expected), Some(found)) => {
-                        format!("expected {}, found '{}'", expected, found)
-                    }
-                    (Some(expected), None) => {
-                        format!("expected {}, found end of input", expected)
-                    }
-                    (None, Some(found)) => format!("unexpected '{}'", found),
-                    (None, None) => "unexpected end of input".to_string(),
-                }
-            }
-            SimpleReason::Unclosed {
-                span: unclosed_span,
-                delimiter,
-            } => {
-                let delimiter = format!("'{}'", delimiter);
-                let expected = if expected_tokens.is_empty() {
-                    delimiter.clone()
-                } else {
-                    expected_tokens.join(", ")
-                };
-                format!(
-                    "unclosed {}, expected {} to close span {:?}",
-                    delimiter, expected, unclosed_span
-                )
-            }
-            SimpleReason::Custom(msg) => msg.to_string(),
-        };
 
         formatted.push(format!(
             "Parse error at line {}, column {}: {}",
@@ -956,6 +924,43 @@ fn format_parse_errors(input: &str, errors: Vec<Simple<char>>) -> Vec<String> {
     }
 
     formatted
+}
+
+fn format_reason<T: std::fmt::Display + Clone + std::cmp::Eq + std::hash::Hash>(
+    error: &Simple<T>,
+    expected_tokens: &[String],
+) -> String {
+    match error.reason() {
+        SimpleReason::Unexpected => {
+            let expected = if expected_tokens.is_empty() {
+                None
+            } else {
+                Some(expected_tokens.join(", "))
+            };
+            match (expected, error.found()) {
+                (Some(expected), Some(found)) => format!("expected {}, found '{}'", expected, found),
+                (Some(expected), None) => format!("expected {}, found end of input", expected),
+                (None, Some(found)) => format!("unexpected '{}'", found),
+                (None, None) => "unexpected end of input".to_string(),
+            }
+        }
+        SimpleReason::Unclosed {
+            span: unclosed_span,
+            delimiter,
+        } => {
+            let delimiter = format!("'{}'", delimiter);
+            let expected = if expected_tokens.is_empty() {
+                delimiter.clone()
+            } else {
+                expected_tokens.join(", ")
+            };
+            format!(
+                "unclosed {}, expected {} to close span {:?}",
+                delimiter, expected, unclosed_span
+            )
+        }
+        SimpleReason::Custom(msg) => msg.to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -1094,7 +1099,7 @@ mod tests {
         assert_eq!(
             response.lines,
             vec![
-                "Parse error at line 1, column 19: expected '%', '.', '/', ':', found end of input"
+                "Parse error at line 1, column 19: expected '.', ':-', found end of input"
                     .to_string(),
                 "  parent(john, mary)".to_string(),
                 "                    ^".to_string(),

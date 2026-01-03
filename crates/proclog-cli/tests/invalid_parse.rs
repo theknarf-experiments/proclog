@@ -25,7 +25,7 @@ fn reports_parse_error_with_context() {
         )))
         .stderr(predicate::str::contains("^"))
         .stderr(
-            predicate::str::contains("Unexpected character '#'")
+            predicate::str::contains("Unexpected token '#'")
                 .and(predicate::str::contains("term")),
         );
 }
