@@ -1,0 +1,10 @@
+[package]
+name = "proclog-safety"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+proclog-ast = { path = "../proclog-ast" }
+
+[dev-dependencies]
+internment = { workspace = true }

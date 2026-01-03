@@ -1,0 +1,11 @@
+[package]
+name = "proclog-builtins"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+proclog-ast = { path = "../proclog-ast" }
+proclog-core = { path = "../proclog-core" }
+
+[dev-dependencies]
+internment = { workspace = true }

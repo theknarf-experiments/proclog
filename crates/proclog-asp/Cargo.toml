@@ -1,0 +1,22 @@
+[package]
+name = "proclog-asp"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+serde = ["dep:serde", "proclog-ast/serde"]
+
+[dependencies]
+proclog-ast = { path = "../proclog-ast" }
+proclog-core = { path = "../proclog-core" }
+proclog-eval = { path = "../proclog-eval" }
+proclog-grounding = { path = "../proclog-grounding" }
+proclog-safety = { path = "../proclog-safety" }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+serde = { version = "1.0", features = ["derive"], optional = true }
+
+[dev-dependencies]
+proclog-parser = { path = "../proclog-parser" }
+proclog-sat = { path = "../proclog-sat" }
+internment = { workspace = true }

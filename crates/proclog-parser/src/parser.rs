@@ -771,6 +771,7 @@ mod tests {
 
     // Floats
     #[test]
+    #[allow(clippy::approx_constant)]
     fn test_parse_positive_float() {
         let result = parse_with(term(), "3.14");
         assert!(result.is_ok());
@@ -1186,6 +1187,7 @@ mod tests {
 
     // Constant declarations with different data types
     #[test]
+    #[allow(clippy::approx_constant)]
     fn test_parse_const_decl_float() {
         let result = parse_program("#const pi = 3.14.");
         assert!(result.is_ok(), "Failed to parse: {:?}", result.err());

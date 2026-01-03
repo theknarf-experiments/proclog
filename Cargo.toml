@@ -2,8 +2,16 @@
 members = [
     "crates/proclog",
     "crates/proclog-ast",
+    "crates/proclog-asp",
+    "crates/proclog-builtins",
+    "crates/proclog-core",
+    "crates/proclog-eval",
+    "crates/proclog-grounding",
     "crates/proclog-parser",
     "crates/proclog-cli",
+    "crates/proclog-safety",
+    "crates/proclog-sat",
+    "crates/proclog-test-runner",
     "crates/proclog-wasm",
 ]
 resolver = "2"

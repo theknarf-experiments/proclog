@@ -1006,7 +1006,7 @@ mod tests {
         let response = engine.process_line("?- character_race(X).");
         assert_eq!(response.kind, ResponseKind::Output);
         // Should contain results from ASP evaluation
-        assert!(response.lines.len() > 0);
+        assert!(!response.lines.is_empty());
     }
 
     #[test]

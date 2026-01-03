@@ -1,17 +1,10 @@
 [package]
-name = "proclog"
+name = "proclog-test-runner"
 version = "0.1.0"
 edition = "2021"
 
 [features]
-default = []
-serde = [
-    "dep:serde",
-    "internment/serde",
-    "proclog-ast/serde",
-    "proclog-asp/serde",
-    "proclog-test-runner/serde",
-]
+serde = ["dep:serde", "proclog-ast/serde"]
 
 [dependencies]
 internment = { workspace = true }
@@ -22,7 +15,5 @@ proclog-core = { path = "../proclog-core" }
 proclog-eval = { path = "../proclog-eval" }
 proclog-grounding = { path = "../proclog-grounding" }
 proclog-parser = { path = "../proclog-parser" }
-proclog-safety = { path = "../proclog-safety" }
 proclog-sat = { path = "../proclog-sat" }
-proclog-test-runner = { path = "../proclog-test-runner" }
 serde = { version = "1.0", features = ["derive"], optional = true }

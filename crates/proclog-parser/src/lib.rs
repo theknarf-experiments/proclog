@@ -31,3 +31,6 @@ pub use parser::{parse_program, parse_query, ParseError};
 pub use span::Span;
 pub use src::SrcId;
 pub use token::{Keyword, LexError, Token};
+
+#[cfg(test)]
+mod arithmetic_integration_tests;

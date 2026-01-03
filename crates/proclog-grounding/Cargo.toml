@@ -1,0 +1,14 @@
+[package]
+name = "proclog-grounding"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+proclog-ast = { path = "../proclog-ast" }
+proclog-builtins = { path = "../proclog-builtins" }
+proclog-core = { path = "../proclog-core" }
+
+[dev-dependencies]
+proclog-core = { path = "../proclog-core", features = ["test-utils"] }
+proclog-parser = { path = "../proclog-parser" }
+internment = { workspace = true }

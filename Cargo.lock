@@ -724,12 +724,34 @@ name = "proclog"
 version = "0.1.0"
 dependencies = [
  "internment",
+ "proclog-asp",
  "proclog-ast",
+ "proclog-builtins",
+ "proclog-core",
+ "proclog-eval",
+ "proclog-grounding",
  "proclog-parser",
+ "proclog-safety",
+ "proclog-sat",
+ "proclog-test-runner",
+ "serde",
+]
+
+[[package]]
+name = "proclog-asp"
+version = "0.1.0"
+dependencies = [
+ "internment",
+ "proclog-ast",
+ "proclog-core",
+ "proclog-eval",
+ "proclog-grounding",
+ "proclog-parser",
+ "proclog-safety",
+ "proclog-sat",
  "rand",
  "rand_chacha",
  "serde",
- "splr",
 ]
 
 [[package]]
@@ -738,6 +760,15 @@ version = "0.1.0"
 dependencies = [
  "internment",
  "serde",
+]
+
+[[package]]
+name = "proclog-builtins"
+version = "0.1.0"
+dependencies = [
+ "internment",
+ "proclog-ast",
+ "proclog-core",
 ]
 
 [[package]]
@@ -756,6 +787,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "proclog-core"
+version = "0.1.0"
+dependencies = [
+ "internment",
+ "proclog-ast",
+]
+
+[[package]]
+name = "proclog-eval"
+version = "0.1.0"
+dependencies = [
+ "internment",
+ "proclog-ast",
+ "proclog-builtins",
+ "proclog-core",
+ "proclog-grounding",
+ "proclog-parser",
+ "proclog-safety",
+]
+
+[[package]]
+name = "proclog-grounding"
+version = "0.1.0"
+dependencies = [
+ "internment",
+ "proclog-ast",
+ "proclog-builtins",
+ "proclog-core",
+ "proclog-parser",
+]
+
+[[package]]
 name = "proclog-parser"
 version = "0.1.0"
 dependencies = [
@@ -763,6 +826,44 @@ dependencies = [
  "chumsky",
  "internment",
  "proclog-ast",
+]
+
+[[package]]
+name = "proclog-safety"
+version = "0.1.0"
+dependencies = [
+ "internment",
+ "proclog-ast",
+]
+
+[[package]]
+name = "proclog-sat"
+version = "0.1.0"
+dependencies = [
+ "internment",
+ "proclog-asp",
+ "proclog-ast",
+ "proclog-core",
+ "proclog-eval",
+ "proclog-grounding",
+ "proclog-parser",
+ "splr",
+]
+
+[[package]]
+name = "proclog-test-runner"
+version = "0.1.0"
+dependencies = [
+ "internment",
+ "proclog-asp",
+ "proclog-ast",
+ "proclog-builtins",
+ "proclog-core",
+ "proclog-eval",
+ "proclog-grounding",
+ "proclog-parser",
+ "proclog-sat",
+ "serde",
 ]
 
 [[package]]
