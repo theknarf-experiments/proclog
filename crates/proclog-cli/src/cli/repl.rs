@@ -195,7 +195,11 @@ impl ReplApp {
         ));
         lines.push(plain_line(format!(
             "  Current: {}",
-            if stats.use_sat_solver { "sat" } else { "native" }
+            if stats.use_sat_solver {
+                "sat"
+            } else {
+                "native"
+            }
         )));
 
         lines.push(Line::default());

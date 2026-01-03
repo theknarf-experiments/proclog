@@ -252,7 +252,10 @@ mod native_optimization_tests {
                 && atom.terms.len() == 1
                 && matches!(&atom.terms[0], Term::Constant(Value::Atom(name)) if name.as_str() == "c")
         });
-        assert!(has_b && has_c, "Expected optimal answer set to pick b and c");
+        assert!(
+            has_b && has_c,
+            "Expected optimal answer set to pick b and c"
+        );
     }
 }
 
@@ -285,7 +288,10 @@ mod sat_optimization_tests {
 
         // The optimal answer set should pick b (cost 5)
         let optimal = &answer_sets[0];
-        let has_b = optimal.atoms.iter().any(|atom| atom.predicate.as_str() == "picked_b");
+        let has_b = optimal
+            .atoms
+            .iter()
+            .any(|atom| atom.predicate.as_str() == "picked_b");
         assert!(has_b, "Expected optimal answer set to pick_b");
     }
 
@@ -314,7 +320,10 @@ mod sat_optimization_tests {
 
         // The optimal answer set should pick b (value 25)
         let optimal = &answer_sets[0];
-        let has_b = optimal.atoms.iter().any(|atom| atom.predicate.as_str() == "picked_b");
+        let has_b = optimal
+            .atoms
+            .iter()
+            .any(|atom| atom.predicate.as_str() == "picked_b");
         assert!(has_b, "Expected optimal answer set to pick_b");
     }
 

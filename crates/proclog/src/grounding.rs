@@ -250,7 +250,7 @@ fn combine_substs(s1: &Substitution, s2: &Substitution) -> Option<Substitution> 
             }
         }
 
-        combined.bind(var.clone(), candidate);
+        combined.bind(*var, candidate);
     }
 
     Some(combined)
@@ -407,7 +407,7 @@ pub fn expand_atom_ranges(atom: &Atom, const_env: &ConstantEnv) -> Vec<Atom> {
     expanded_term_lists
         .into_iter()
         .map(|terms| Atom {
-            predicate: atom.predicate.clone(),
+            predicate: atom.predicate,
             terms,
         })
         .collect()

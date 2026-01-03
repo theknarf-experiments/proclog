@@ -9,12 +9,11 @@ fn test_splr_from_cnf() {
     // Variable 1 = a, Variable 2 = b, Variable 3 = c
     let config = Config::default();
     let clauses: Vec<Vec<i32>> = vec![
-        vec![1, 2],      // a OR b
-        vec![-1, 3],     // NOT a OR c
+        vec![1, 2],  // a OR b
+        vec![-1, 3], // NOT a OR c
     ];
 
-    let mut solver = Solver::try_from((config, clauses.as_ref()))
-        .expect("Failed to create solver");
+    let mut solver = Solver::try_from((config, clauses.as_ref())).expect("Failed to create solver");
 
     println!("Created solver with 2 clauses");
 
@@ -34,13 +33,12 @@ fn test_splr_incremental_simple() {
     // Start with empty clauses, try adding them incrementally
     let config = Config::default();
     let clauses: Vec<Vec<i32>> = vec![
-        vec![1, 2],      // a OR b
-        vec![-1, 3],     // NOT a OR c
-        vec![1],         // a is true
+        vec![1, 2],  // a OR b
+        vec![-1, 3], // NOT a OR c
+        vec![1],     // a is true
     ];
 
-    let mut solver = Solver::try_from((config, clauses.as_ref()))
-        .expect("Failed to create solver");
+    let mut solver = Solver::try_from((config, clauses.as_ref())).expect("Failed to create solver");
 
     println!("Created solver with 3 clauses");
 
@@ -61,11 +59,10 @@ fn test_splr_add_clause_after_init() {
     // Start with some clauses that define all variables
     let config = Config::default();
     let clauses: Vec<Vec<i32>> = vec![
-        vec![1, 2, 3],   // Declare all 3 variables upfront
+        vec![1, 2, 3], // Declare all 3 variables upfront
     ];
 
-    let mut solver = Solver::try_from((config, clauses.as_ref()))
-        .expect("Failed to create solver");
+    let mut solver = Solver::try_from((config, clauses.as_ref())).expect("Failed to create solver");
 
     println!("Created solver with 1 clause (defining vars 1-3)");
 
@@ -89,11 +86,10 @@ fn test_splr_needs_variables_upfront() {
     // Verify that we can't use variables not declared in initial clauses
     let config = Config::default();
     let clauses: Vec<Vec<i32>> = vec![
-        vec![1, 2],      // Only declare vars 1, 2
+        vec![1, 2], // Only declare vars 1, 2
     ];
 
-    let mut solver = Solver::try_from((config, clauses.as_ref()))
-        .expect("Failed to create solver");
+    let mut solver = Solver::try_from((config, clauses.as_ref())).expect("Failed to create solver");
 
     // This should fail because var 3 wasn't in initial clauses
     match solver.add_clause(vec![-1, 3]) {
@@ -111,9 +107,9 @@ fn test_splr_unsat_example() {
     // This demonstrates that splr detects UNSAT during TryFrom, not during solve()
     let config = Config::default();
     let clauses: Vec<Vec<i32>> = vec![
-        vec![1],         // a is true
-        vec![2],         // b is true
-        vec![-1, -2],    // NOT a OR NOT b (cannot have both)
+        vec![1],      // a is true
+        vec![2],      // b is true
+        vec![-1, -2], // NOT a OR NOT b (cannot have both)
     ];
 
     match Solver::try_from((config, clauses.as_ref())) {

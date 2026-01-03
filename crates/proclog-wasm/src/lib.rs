@@ -3,8 +3,8 @@
 //! This crate provides WASM bindings for the ProcLog logic programming language,
 //! allowing it to be used from JavaScript/TypeScript in Node.js and browsers.
 
-use proclog::{asp, parser, test_runner};
 use proclog::parser::SrcId;
+use proclog::{asp, parser, test_runner};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 

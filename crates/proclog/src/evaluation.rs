@@ -302,13 +302,15 @@ pub fn check_constraints(
 
     for constraint in constraints {
         // Separate aggregates from other literals
-        let non_agg_literals: Vec<_> = constraint.body
+        let non_agg_literals: Vec<_> = constraint
+            .body
             .iter()
             .filter(|lit| !lit.is_aggregate())
             .cloned()
             .collect();
 
-        let agg_literals: Vec<_> = constraint.body
+        let agg_literals: Vec<_> = constraint
+            .body
             .iter()
             .filter_map(|lit| {
                 if let Literal::Aggregate(agg) = lit {

@@ -119,7 +119,11 @@ fn substitute_choice_element(const_env: &ConstantEnv, element: &ChoiceElement) -
 }
 
 /// Run a test block and return results
-pub fn run_test_block(base_statements: &[Statement], test_block: &TestBlock, use_sat_solver: bool) -> TestResult {
+pub fn run_test_block(
+    base_statements: &[Statement],
+    test_block: &TestBlock,
+    use_sat_solver: bool,
+) -> TestResult {
     let prepared = match prepare_test_environment(base_statements, test_block) {
         Ok(env) => env,
         Err(err) => {
@@ -188,7 +192,7 @@ fn prepare_test_environment(
     let mut const_env = ConstantEnv::new();
     for statement in base_statements.iter().chain(test_block.statements.iter()) {
         if let Statement::ConstDecl(const_decl) = statement {
-            const_env.define(const_decl.name.clone(), const_decl.value.clone());
+            const_env.define(const_decl.name, const_decl.value.clone());
         }
     }
 
@@ -248,9 +252,10 @@ fn prepare_test_environment(
     };
 
     // Check if test block defines its own choice rules
-    let test_has_choice_rules = test_block.statements.iter().any(|stmt| {
-        matches!(stmt, Statement::ChoiceRule(_))
-    });
+    let test_has_choice_rules = test_block
+        .statements
+        .iter()
+        .any(|stmt| matches!(stmt, Statement::ChoiceRule(_)));
 
     for statement in base_statements {
         // Skip choice rules from base program if test block defines its own
@@ -279,7 +284,10 @@ fn prepare_test_environment(
     })
 }
 
-fn evaluate_prepared_env(prepared: &PreparedTestEnv, use_sat_solver: bool) -> Result<Vec<AnswerSet>, EvaluationError> {
+fn evaluate_prepared_env(
+    prepared: &PreparedTestEnv,
+    use_sat_solver: bool,
+) -> Result<Vec<AnswerSet>, EvaluationError> {
     if prepared.has_asp_statements() {
         // Use ASP evaluation - construct program from collected components
         let mut statements = Vec::new();
@@ -563,7 +571,7 @@ fn derive_specialized_rule_facts(
 fn canonicalize_atom(atom: &Atom) -> Atom {
     let mut mapping = HashMap::new();
     Atom {
-        predicate: atom.predicate.clone(),
+        predicate: atom.predicate,
         terms: atom
             .terms
             .iter()
@@ -576,17 +584,17 @@ fn canonicalize_term(term: &Term, mapping: &mut HashMap<Symbol, Symbol>) -> Term
     match term {
         Term::Variable(var) => {
             let symbol = if let Some(existing) = mapping.get(var) {
-                existing.clone()
+                *existing
             } else {
                 let name = format!("_G{}", mapping.len());
                 let interned = Intern::new(name);
-                mapping.insert(var.clone(), interned.clone());
+                mapping.insert(*var, interned);
                 interned
             };
             Term::Variable(symbol)
         }
         Term::Compound(functor, args) => Term::Compound(
-            functor.clone(),
+            *functor,
             args.iter()
                 .map(|arg| canonicalize_term(arg, mapping))
                 .collect(),
@@ -623,14 +631,15 @@ fn handle_equality_builtins(head: &Atom, body: &[Literal], db: &mut FactDatabase
 }
 
 fn is_equality_builtin_literal(literal: &Literal) -> bool {
-    match literal {
-        Literal::Positive(atom) => match builtins::parse_builtin(atom) {
-            Some(builtins::BuiltIn::Comparison(builtins::CompOp::Eq, _, _))
-            | Some(builtins::BuiltIn::Comparison(builtins::CompOp::Neq, _, _)) => true,
-            _ => false,
-        },
-        _ => false,
-    }
+    matches!(
+        literal,
+        Literal::Positive(atom)
+            if matches!(
+                builtins::parse_builtin(atom),
+                Some(builtins::BuiltIn::Comparison(builtins::CompOp::Eq, _, _))
+                    | Some(builtins::BuiltIn::Comparison(builtins::CompOp::Neq, _, _))
+            )
+    )
 }
 
 fn builtin_holds(subst: &Substitution, literal: &Literal) -> bool {
@@ -674,13 +683,13 @@ fn collect_relevant_rules(query: &crate::ast::Query, rules: &[Rule]) -> Vec<Rule
     for literal in &query.body {
         if let Literal::Positive(atom) = literal {
             if builtins::parse_builtin(atom).is_none() {
-                queue.push_back(atom.predicate.clone());
+                queue.push_back(atom.predicate);
             }
         }
     }
 
     while let Some(predicate) = queue.pop_front() {
-        if !seen.insert(predicate.clone()) {
+        if !seen.insert(predicate) {
             continue;
         }
 
@@ -690,7 +699,7 @@ fn collect_relevant_rules(query: &crate::ast::Query, rules: &[Rule]) -> Vec<Rule
             for body_literal in &rule.body {
                 if let Literal::Positive(body_atom) = body_literal {
                     if builtins::parse_builtin(body_atom).is_none() {
-                        queue.push_back(body_atom.predicate.clone());
+                        queue.push_back(body_atom.predicate);
                     }
                 }
             }
@@ -705,7 +714,7 @@ fn should_use_rule_fallback(query: &crate::ast::Query, rules: &[Rule]) -> bool {
 
     for literal in &query.body {
         let predicate = match literal {
-            Literal::Positive(atom) => atom.predicate.clone(),
+            Literal::Positive(atom) => atom.predicate,
             Literal::Negative(_) => continue,
             Literal::Aggregate(_) => continue,
         };
@@ -747,7 +756,7 @@ fn check_assertions(
     let mut negative_failures = Vec::new();
     let substituted_query_body = substitute_literals(const_env, &test_case.query.body);
     let query_atom_for_assertions = substituted_query_body
-        .get(0)
+        .first()
         .and_then(|literal| literal.atom().cloned());
 
     // Check positive assertions (should be in results)
@@ -764,7 +773,7 @@ fn check_assertions(
             let matches = results.iter().any(|subst| {
                 query_atom_for_assertions
                     .as_ref()
-                    .map_or(false, |query_atom| {
+                    .is_some_and(|query_atom| {
                         let instantiated = subst.apply_atom(query_atom);
                         atoms_match(&instantiated, &substituted)
                     })
@@ -784,7 +793,7 @@ fn check_assertions(
         let matches = results.iter().any(|subst| {
             query_atom_for_assertions
                 .as_ref()
-                .map_or(false, |query_atom| {
+                .is_some_and(|query_atom| {
                     let instantiated = subst.apply_atom(query_atom);
                     atoms_match(&instantiated, &substituted)
                 })

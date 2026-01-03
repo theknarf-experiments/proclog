@@ -65,7 +65,11 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Test { files, watch, sat_solver } => {
+        Commands::Test {
+            files,
+            watch,
+            sat_solver,
+        } => {
             cli::test::run(&files, watch, sat_solver);
         }
         Commands::Repl { input } => {

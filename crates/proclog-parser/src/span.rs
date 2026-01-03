@@ -1,8 +1,5 @@
 use crate::SrcId;
-use std::{
-    fmt,
-    ops::Range,
-};
+use std::{fmt, ops::Range};
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub struct Span {
@@ -115,11 +112,7 @@ mod tests {
             "rendered output:\n{}",
             cleaned
         );
-        assert!(
-            cleaned.contains("second"),
-            "rendered output:\n{}",
-            cleaned
-        );
+        assert!(cleaned.contains("second"), "rendered output:\n{}", cleaned);
     }
 
     fn strip_ansi(input: &str) -> String {

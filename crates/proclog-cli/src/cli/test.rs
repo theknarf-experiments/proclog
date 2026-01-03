@@ -2,8 +2,8 @@ use crate::test_runner::{self, TestResultExt};
 use crate::{COLOR_CYAN, COLOR_GREEN, COLOR_RED, COLOR_RESET, COLOR_YELLOW};
 use chumsky::error::{Simple, SimpleReason};
 use notify::{recommended_watcher, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use proclog::{ast, parser};
 use proclog::parser::{ParseError, Token};
+use proclog::{ast, parser};
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -96,7 +96,8 @@ pub fn run(files: &[PathBuf], watch: bool, use_sat_solver: bool) {
                             COLOR_CYAN, COLOR_RESET
                         );
                         for (idx, file) in inputs.iter().enumerate() {
-                            let _ = run_tests_from_file(&file.canonical, &file.display, use_sat_solver);
+                            let _ =
+                                run_tests_from_file(&file.canonical, &file.display, use_sat_solver);
                             if idx < inputs.len() - 1 {
                                 println!();
                             }
@@ -311,9 +312,9 @@ fn format_error_with_expected<T: std::fmt::Display + Clone + std::cmp::Eq + std:
 
     let expected: Vec<String> = error
         .expected()
-        .filter_map(|expected| match expected {
-            Some(token) => Some(expected_token(token)),
-            None => Some("end of input".to_string()),
+        .map(|expected| match expected {
+            Some(token) => expected_token(token),
+            None => "end of input".to_string(),
         })
         .collect();
 

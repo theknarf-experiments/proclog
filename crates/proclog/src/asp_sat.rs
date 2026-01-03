@@ -75,7 +75,7 @@ fn replace_anonymous_variables(rule: &Rule, counter: &mut usize) -> Rule {
                 Term::Variable(Intern::new(format!("_anon{}", counter)))
             }
             Term::Compound(f, args) => {
-                Term::Compound(f.clone(), args.iter().map(|t| replace_term(t, counter)).collect())
+                Term::Compound(*f, args.iter().map(|t| replace_term(t, counter)).collect())
             }
             _ => term.clone(),
         }
@@ -83,8 +83,12 @@ fn replace_anonymous_variables(rule: &Rule, counter: &mut usize) -> Rule {
 
     fn replace_atom(atom: &Atom, counter: &mut usize) -> Atom {
         Atom {
-            predicate: atom.predicate.clone(),
-            terms: atom.terms.iter().map(|t| replace_term(t, counter)).collect(),
+            predicate: atom.predicate,
+            terms: atom
+                .terms
+                .iter()
+                .map(|t| replace_term(t, counter))
+                .collect(),
         }
     }
 
@@ -98,7 +102,11 @@ fn replace_anonymous_variables(rule: &Rule, counter: &mut usize) -> Rule {
 
     Rule {
         head: replace_atom(&rule.head, counter),
-        body: rule.body.iter().map(|lit| replace_literal(lit, counter)).collect(),
+        body: rule
+            .body
+            .iter()
+            .map(|lit| replace_literal(lit, counter))
+            .collect(),
     }
 }
 
@@ -191,11 +199,13 @@ pub fn asp_sat_evaluation_with_grounding(program: &Program) -> Vec<AnswerSet> {
     // Separate rules into:
     // 1. Definite rules (no negation) - can be pre-evaluated to derive facts
     // 2. Non-definite rules (with negation) - must be kept as rules for guess-and-check
-    let (definite_rules, non_definite_rules): (Vec<Rule>, Vec<Rule>) = rules
-        .into_iter()
-        .partition(|rule| {
+    let (definite_rules, non_definite_rules): (Vec<Rule>, Vec<Rule>) =
+        rules.into_iter().partition(|rule| {
             // A rule is definite if it has no negation in its body
-            !rule.body.iter().any(|lit| matches!(lit, Literal::Negative(_)))
+            !rule
+                .body
+                .iter()
+                .any(|lit| matches!(lit, Literal::Negative(_)))
         });
 
     // Evaluate ONLY definite rules to derive facts
@@ -215,9 +225,7 @@ pub fn asp_sat_evaluation_with_grounding(program: &Program) -> Vec<AnswerSet> {
 
     // Add all derived facts to the ground program
     for fact in derived_db.all_facts() {
-        ground_program.add_statement(Statement::Fact(Fact {
-            atom: fact.clone(),
-        }));
+        ground_program.add_statement(Statement::Fact(Fact { atom: fact.clone() }));
     }
 
     // Preserve optimization statements (they don't need grounding)
@@ -361,9 +369,7 @@ pub fn asp_sat_evaluation_with_grounding(program: &Program) -> Vec<AnswerSet> {
                 })
                 .collect();
 
-            ground_program.add_statement(Statement::Constraint(Constraint {
-                body: ground_body,
-            }));
+            ground_program.add_statement(Statement::Constraint(Constraint { body: ground_body }));
         }
     }
 
@@ -532,7 +538,11 @@ fn evaluate_with_sat_encoding(program: &Program) -> Vec<AnswerSet> {
         base_facts.clone()
     } else {
         // Evaluate without constraints first (constraints checked during SAT solving)
-        match crate::evaluation::stratified_evaluation_with_constraints(&rules, &[], base_facts.clone()) {
+        match crate::evaluation::stratified_evaluation_with_constraints(
+            &rules,
+            &[],
+            base_facts.clone(),
+        ) {
             Ok(db) => db,
             Err(_) => return vec![], // Rules themselves inconsistent
         }
@@ -545,11 +555,8 @@ fn evaluate_with_sat_encoding(program: &Program) -> Vec<AnswerSet> {
         if let Statement::ChoiceRule(choice_rule) = statement {
             // Use ground_choice_rule_split to properly ground the choice rule
             // This handles choice element conditions and body substitutions
-            let grounded_groups = crate::grounding::ground_choice_rule_split(
-                choice_rule,
-                &derived_db,
-                &const_env,
-            );
+            let grounded_groups =
+                crate::grounding::ground_choice_rule_split(choice_rule, &derived_db, &const_env);
 
             // Each group is an independent choice (one per body substitution)
             for grounded_atoms in grounded_groups {
@@ -631,7 +638,8 @@ fn evaluate_with_sat_encoding(program: &Program) -> Vec<AnswerSet> {
             };
 
             // Ground the rule against the extended database
-            let body_substs = crate::grounding::satisfy_body(&rule_with_named_vars.body, &extended_db);
+            let body_substs =
+                crate::grounding::satisfy_body(&rule_with_named_vars.body, &extended_db);
 
             for subst in body_substs {
                 let ground_head = subst.apply_atom(&rule_with_named_vars.head);
@@ -769,7 +777,6 @@ fn evaluate_with_sat_encoding(program: &Program) -> Vec<AnswerSet> {
         }
     }
 
-
     // Step 7: Find all models using incremental SAT solving
     const MAX_MODELS: usize = 100000; // Safety limit
 
@@ -786,10 +793,15 @@ fn evaluate_with_sat_encoding(program: &Program) -> Vec<AnswerSet> {
                     .filter_map(|(atom, &value)| if value { Some(atom.clone()) } else { None })
                     .collect();
 
-                result.push(AnswerSet { atoms: atoms.clone() });
+                result.push(AnswerSet {
+                    atoms: atoms.clone(),
+                });
 
                 if result.len() >= MAX_MODELS {
-                    eprintln!("Warning: Reached maximum of {} answer sets, stopping enumeration", MAX_MODELS);
+                    eprintln!(
+                        "Warning: Reached maximum of {} answer sets, stopping enumeration",
+                        MAX_MODELS
+                    );
                     break;
                 }
 
@@ -927,7 +939,7 @@ fn evaluate_with_guess(program: &Program, guess: &HashSet<Atom>) -> Option<Answe
     for atom in &all_choice_atoms {
         if !guess.contains(atom) {
             // Add constraint: :- atom (atom must be false)
-            solver.add_constraint(&[atom.clone()]);
+            solver.add_constraint(std::slice::from_ref(atom));
         }
     }
 
@@ -973,7 +985,7 @@ fn evaluate_with_guess(program: &Program, guess: &HashSet<Atom>) -> Option<Answe
         if !active_rules.contains(head) && !guess.contains(head) {
             // This head has no active rules and is not in the guess
             // So it must be false
-            solver.add_constraint(&[head.clone()]);
+            solver.add_constraint(std::slice::from_ref(head));
         }
     }
 
@@ -1046,14 +1058,19 @@ fn evaluate_definite_program(program: &Program) -> Vec<AnswerSet> {
 
 /// Check if program has choice rules
 fn has_choice_rules(program: &Program) -> bool {
-    program.statements.iter().any(|stmt| matches!(stmt, Statement::ChoiceRule(_)))
+    program
+        .statements
+        .iter()
+        .any(|stmt| matches!(stmt, Statement::ChoiceRule(_)))
 }
 
 /// Check if program has negation in rule bodies
 fn has_negation_in_rules(program: &Program) -> bool {
     program.statements.iter().any(|stmt| {
         if let Statement::Rule(rule) = stmt {
-            rule.body.iter().any(|lit| matches!(lit, Literal::Negative(_)))
+            rule.body
+                .iter()
+                .any(|lit| matches!(lit, Literal::Negative(_)))
         } else {
             false
         }
@@ -1121,7 +1138,7 @@ fn translate_to_sat(program: &Program) -> AspSatSolver {
                 // Also collect for Clark completion (only positive body for now)
                 rules_by_head
                     .entry(rule.head.clone())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(positive_body);
             }
             Statement::Constraint(constraint) => {
@@ -1195,7 +1212,7 @@ fn translate_to_sat(program: &Program) -> AspSatSolver {
     // Rules are already added with add_rule_with_negation above
     // which handles both the implication and Clark completion
     // The rules_by_head collection is no longer needed
-    let _ = rules_by_head;  // Suppress unused variable warning
+    let _ = rules_by_head; // Suppress unused variable warning
 
     solver
 }

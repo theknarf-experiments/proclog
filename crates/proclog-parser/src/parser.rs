@@ -153,7 +153,13 @@ fn factor_parser<'a>(
             }
         });
 
-    choice((variable, number_const, string_const, parens, compound_or_atom))
+    choice((
+        variable,
+        number_const,
+        string_const,
+        parens,
+        compound_or_atom,
+    ))
 }
 
 fn range_parser() -> impl Parser<Token, Term, Error = ParserError> + Clone {
@@ -186,7 +192,7 @@ fn arithmetic_parser<'a>(
                 ident_value("mod").to("mod"),
             ))
             .then(factor.clone())
-                .repeated(),
+            .repeated(),
         )
         .foldl(|left, (op, right)| Term::Compound(Intern::new(op.to_string()), vec![left, right]));
 
@@ -234,18 +240,16 @@ fn atom() -> impl Parser<Token, Atom, Error = ParserError> + Clone {
 /// Parse an infix comparison as an atom (e.g., X > 3, Y = 5)
 fn infix_comparison() -> impl Parser<Token, Atom, Error = ParserError> + Clone {
     term()
-        .then(
-            choice((
-                operator_token("<=").to("<="),
-                operator_token(">=").to(">="),
-                operator_token("!=").to("!="),
-                operator_token("\\=").to("\\="),
-                operator_token("=<").to("=<"),
-                operator_token("=").to("="),
-                operator_token("<").to("<"),
-                operator_token(">").to(">"),
-            )),
-        )
+        .then(choice((
+            operator_token("<=").to("<="),
+            operator_token(">=").to(">="),
+            operator_token("!=").to("!="),
+            operator_token("\\=").to("\\="),
+            operator_token("=<").to("=<"),
+            operator_token("=").to("="),
+            operator_token("<").to("<"),
+            operator_token(">").to(">"),
+        )))
         .then(term())
         .map(|((left, op), right)| Atom {
             predicate: Intern::new(op.to_string()),
@@ -370,11 +374,7 @@ fn fact() -> impl Parser<Token, Statement, Error = ParserError> + Clone {
 fn rule() -> impl Parser<Token, Statement, Error = ParserError> + Clone {
     atom()
         .then_ignore(token(Token::RuleSep))
-        .then(
-            literal()
-                .separated_by(token(Token::Comma))
-                .at_least(1),
-        )
+        .then(literal().separated_by(token(Token::Comma)).at_least(1))
         .then_ignore(token(Token::Dot))
         .map(|(head, body)| Statement::Rule(Rule { head, body }))
         .labelled("rule")
@@ -420,12 +420,9 @@ fn const_decl() -> impl Parser<Token, Statement, Error = ParserError> + Clone {
 
 /// Parse a test assertion: + atom. or - atom.
 fn test_assertion() -> impl Parser<Token, (bool, Atom), Error = ParserError> + Clone {
-    choice((
-        operator_token("+").to(true),
-        operator_token("-").to(false),
-    ))
-    .then(atom())
-    .then_ignore(token(Token::Dot))
+    choice((operator_token("+").to(true), operator_token("-").to(false)))
+        .then(atom())
+        .then_ignore(token(Token::Dot))
         .labelled("test assertion")
 }
 
@@ -2233,7 +2230,11 @@ mod tests {
     fn test_parse_minimize_simple() {
         // Test: #minimize { X : cost(X) }.
         let result = parse_with(program(), "#minimize { X : cost(X) }.");
-        assert!(result.is_ok(), "Failed to parse minimize: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Failed to parse minimize: {:?}",
+            result.err()
+        );
 
         let prog = result.unwrap();
         assert_eq!(prog.statements.len(), 1);
@@ -2252,7 +2253,11 @@ mod tests {
     fn test_parse_maximize_simple() {
         // Test: #maximize { X : value(X) }.
         let result = parse_with(program(), "#maximize { X : value(X) }.");
-        assert!(result.is_ok(), "Failed to parse maximize: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Failed to parse maximize: {:?}",
+            result.err()
+        );
 
         let prog = result.unwrap();
         assert_eq!(prog.statements.len(), 1);
@@ -2270,7 +2275,11 @@ mod tests {
     fn test_parse_minimize_with_weight() {
         // Test: #minimize { C*X : cost(X, C) }.
         let result = parse_with(program(), "#minimize { C*X : cost(X, C) }.");
-        assert!(result.is_ok(), "Failed to parse weighted minimize: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Failed to parse weighted minimize: {:?}",
+            result.err()
+        );
 
         let prog = result.unwrap();
         match &prog.statements[0] {
@@ -2286,7 +2295,11 @@ mod tests {
     fn test_parse_minimize_integer() {
         // Test: #minimize { 5 }.
         let result = parse_with(program(), "#minimize { 5 }.");
-        assert!(result.is_ok(), "Failed to parse integer minimize: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Failed to parse integer minimize: {:?}",
+            result.err()
+        );
 
         let prog = result.unwrap();
         match &prog.statements[0] {

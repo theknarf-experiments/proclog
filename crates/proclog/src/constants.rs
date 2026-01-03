@@ -7,6 +7,12 @@ pub struct ConstantEnv {
     constants: HashMap<Symbol, Value>,
 }
 
+impl Default for ConstantEnv {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ConstantEnv {
     pub fn new() -> Self {
         ConstantEnv {
@@ -40,7 +46,7 @@ impl ConstantEnv {
 
         for statement in &program.statements {
             if let Statement::ConstDecl(const_decl) = statement {
-                env.define(const_decl.name.clone(), const_decl.value.clone());
+                env.define(const_decl.name, const_decl.value.clone());
             }
         }
 
@@ -53,7 +59,7 @@ impl ConstantEnv {
 
         for statement in statements {
             if let Statement::ConstDecl(const_decl) = statement {
-                env.define(const_decl.name.clone(), const_decl.value.clone());
+                env.define(const_decl.name, const_decl.value.clone());
             }
         }
 
@@ -76,7 +82,7 @@ impl ConstantEnv {
                 // Recursively substitute in compound terms
                 let new_args: Vec<Term> =
                     args.iter().map(|arg| self.substitute_term(arg)).collect();
-                Term::Compound(functor.clone(), new_args)
+                Term::Compound(*functor, new_args)
             }
             _ => term.clone(),
         }
@@ -86,7 +92,7 @@ impl ConstantEnv {
     #[allow(dead_code)]
     pub fn substitute_atom(&self, atom: &Atom) -> Atom {
         Atom {
-            predicate: atom.predicate.clone(),
+            predicate: atom.predicate,
             terms: atom.terms.iter().map(|t| self.substitute_term(t)).collect(),
         }
     }

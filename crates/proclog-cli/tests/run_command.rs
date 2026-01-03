@@ -1,10 +1,11 @@
+use assert_cmd::cargo::cargo_bin;
 use assert_cmd::prelude::*;
 use predicates::prelude::*;
 use std::path::PathBuf;
 use std::process::Command;
 
 fn cli() -> Command {
-    Command::cargo_bin("proclog-cli").expect("binary exists")
+    Command::new(cargo_bin("proclog-cli"))
 }
 
 #[test]
@@ -40,7 +41,9 @@ fn run_subcommand_rejects_zero_sample_count() {
     cmd.args(["run", "--sample", "0", "tests/fixtures/run_sample.proclog"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("Sample count must be greater than zero"));
+        .stderr(predicate::str::contains(
+            "Sample count must be greater than zero",
+        ));
 }
 
 #[test]
@@ -118,18 +121,13 @@ fn run_subcommand_same_seed_is_deterministic() {
 #[test]
 fn run_subcommand_limits_sample_count_to_available_sets() {
     let mut cmd = cli();
-    cmd.args([
-        "run",
-        "--sample",
-        "99",
-        "tests/fixtures/run_sample.proclog",
-    ])
-    .assert()
-    .success()
-    .stdout(
-        predicate::str::contains("Sampled 4 answer set(s).")
-            .and(predicate::str::contains("Answer set 4")),
-    );
+    cmd.args(["run", "--sample", "99", "tests/fixtures/run_sample.proclog"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Sampled 4 answer set(s).")
+                .and(predicate::str::contains("Answer set 4")),
+        );
 }
 
 #[test]
@@ -139,12 +137,12 @@ fn run_subcommand_samples_loot_example() {
     cmd.arg("run")
         .args(["--sample", "3", "--seed", "7"])
         .arg(example)
-    .assert()
-    .success()
-    .stdout(
-        predicate::str::contains("Sampled 3 answer set(s).")
-            .and(predicate::str::contains("summary_weapon")),
-    );
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Sampled 3 answer set(s).")
+                .and(predicate::str::contains("summary_weapon")),
+        );
 }
 
 #[test]
@@ -154,12 +152,12 @@ fn run_subcommand_samples_party_example() {
     cmd.arg("run")
         .args(["--sample", "3", "--seed", "21"])
         .arg(example)
-    .assert()
-    .success()
-    .stdout(
-        predicate::str::contains("Sampled 3 answer set(s).")
-            .and(predicate::str::contains("summary_member")),
-    );
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Sampled 3 answer set(s).")
+                .and(predicate::str::contains("summary_member")),
+        );
 }
 fn workspace_path(relative: &str) -> String {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

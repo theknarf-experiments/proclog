@@ -54,8 +54,8 @@ mod count_aggregate_tests {
             :- count { X : selected(X) } > 2.
         "#;
 
-        let program = parse_program(program_text)
-            .expect("Failed to parse program with count aggregate");
+        let program =
+            parse_program(program_text).expect("Failed to parse program with count aggregate");
         let answer_sets = crate::asp::asp_evaluation(&program);
 
         // Without constraint: 2^3 = 8 answer sets
@@ -103,7 +103,10 @@ mod count_aggregate_tests {
             lower_bound: None,
             upper_bound: None,
             elements: vec![ChoiceElement {
-                atom: make_atom("selected", vec![Term::Variable(Intern::new("X".to_string()))]),
+                atom: make_atom(
+                    "selected",
+                    vec![Term::Variable(Intern::new("X".to_string()))],
+                ),
                 condition: vec![Literal::Positive(make_atom(
                     "item",
                     vec![Term::Variable(Intern::new("X".to_string()))],
@@ -113,7 +116,10 @@ mod count_aggregate_tests {
         }));
 
         // Constraint: :- count { X : selected(X) } > 2
-        let selected_x = make_atom("selected", vec![Term::Variable(Intern::new("X".to_string()))]);
+        let selected_x = make_atom(
+            "selected",
+            vec![Term::Variable(Intern::new("X".to_string()))],
+        );
         let count_agg = make_count_aggregate(
             vec!["X"],
             vec![Literal::Positive(selected_x)],

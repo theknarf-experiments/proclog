@@ -71,10 +71,7 @@ impl AspSatSolver {
     /// Add a constraint (body implies false, i.e., NOT body)
     /// For constraint ":- a, b, c", add clause "NOT a OR NOT b OR NOT c"
     pub fn add_constraint(&mut self, atoms: &[Atom]) {
-        let clause: Vec<i32> = atoms
-            .iter()
-            .map(|a| -self.get_or_create_var(a))
-            .collect();
+        let clause: Vec<i32> = atoms.iter().map(|a| -self.get_or_create_var(a)).collect();
         self.clauses.push(clause);
     }
 
@@ -258,7 +255,8 @@ impl AspSatSolver {
 
                 // If s[i-1][j] and var[i] are true, then s[i][j+1] must be true
                 if i > 0 && j < k - 1 {
-                    self.clauses.push(vec![-aux_vars[i - 1][j], -vars[i], aux_vars[i][j + 1]]);
+                    self.clauses
+                        .push(vec![-aux_vars[i - 1][j], -vars[i], aux_vars[i][j + 1]]);
                 }
 
                 // If s[i-1][j] is true, then s[i][j] must be true

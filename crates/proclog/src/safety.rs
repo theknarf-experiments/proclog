@@ -54,7 +54,7 @@ impl std::error::Error for SafetyError {}
 /// A rule is safe if every variable that appears in:
 /// - The head
 /// - A negated literal
-/// also appears in at least one positive literal in the body
+///   also appears in at least one positive literal in the body
 pub fn check_rule_safety(rule: &Rule) -> Result<(), SafetyError> {
     // Collect all variables from positive literals
     let mut positive_vars = HashSet::new();
@@ -124,7 +124,7 @@ fn collect_vars_from_atom(atom: &Atom, vars: &mut HashSet<Symbol>) {
 fn collect_vars_from_term(term: &Term, vars: &mut HashSet<Symbol>) {
     match term {
         Term::Variable(name) => {
-            vars.insert(name.clone());
+            vars.insert(*name);
         }
         Term::Constant(_) => {
             // Constants don't have variables

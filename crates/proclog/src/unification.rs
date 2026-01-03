@@ -25,6 +25,12 @@ pub struct Substitution {
     bindings: HashMap<Symbol, Term>,
 }
 
+impl Default for Substitution {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Substitution {
     pub fn new() -> Self {
         Substitution {
@@ -84,7 +90,7 @@ impl Substitution {
             }
             Term::Compound(functor, args) => {
                 let new_args = args.iter().map(|arg| self.apply(arg)).collect();
-                Term::Compound(functor.clone(), new_args)
+                Term::Compound(*functor, new_args)
             }
         }
     }
@@ -92,7 +98,7 @@ impl Substitution {
     /// Apply substitution to an atom
     pub fn apply_atom(&self, atom: &Atom) -> Atom {
         Atom {
-            predicate: atom.predicate.clone(),
+            predicate: atom.predicate,
             terms: atom.terms.iter().map(|t| self.apply(t)).collect(),
         }
     }
@@ -119,7 +125,7 @@ pub fn unify(term1: &Term, term2: &Term, subst: &mut Substitution) -> bool {
             if occurs_check(var, t) {
                 false
             } else {
-                subst.bind(var.clone(), t.clone());
+                subst.bind(*var, t.clone());
                 true
             }
         }

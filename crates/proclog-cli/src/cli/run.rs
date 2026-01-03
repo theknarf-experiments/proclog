@@ -5,7 +5,12 @@ use proclog::parser::{parse_program, SrcId};
 use std::fs;
 use std::path::Path;
 
-pub fn run(path: &Path, sample: Option<usize>, seed: u64, use_sat_solver: bool) -> Result<(), String> {
+pub fn run(
+    path: &Path,
+    sample: Option<usize>,
+    seed: u64,
+    use_sat_solver: bool,
+) -> Result<(), String> {
     let content = fs::read_to_string(path)
         .map_err(|e| format!("failed to read '{}': {}", path.display(), e))?;
 
@@ -42,7 +47,11 @@ fn run_with_sampling(
     Ok(())
 }
 
-fn run_full(program: &proclog::ast::Program, content: &str, use_sat_solver: bool) -> Result<(), String> {
+fn run_full(
+    program: &proclog::ast::Program,
+    content: &str,
+    use_sat_solver: bool,
+) -> Result<(), String> {
     let answer_sets = if use_sat_solver {
         // Convert from asp_sat::AnswerSet to asp::AnswerSet
         let sat_answer_sets = asp_sat_evaluation_with_grounding(program);
@@ -73,11 +82,7 @@ fn run_full(program: &proclog::ast::Program, content: &str, use_sat_solver: bool
 fn print_answer_sets(answer_sets: &[proclog::asp::AnswerSet]) {
     for (index, answer_set) in answer_sets.iter().enumerate() {
         println!("Answer set {}:", index + 1);
-        let mut atoms: Vec<String> = answer_set
-            .atoms
-            .iter()
-            .map(|atom| format_atom(atom))
-            .collect();
+        let mut atoms: Vec<String> = answer_set.atoms.iter().map(format_atom).collect();
         atoms.sort();
         for atom in atoms {
             println!("  {}", atom);
@@ -89,11 +94,7 @@ fn format_atom(atom: &proclog::ast::Atom) -> String {
     if atom.terms.is_empty() {
         atom.predicate.as_ref().to_string()
     } else {
-        let formatted_terms: Vec<String> = atom
-            .terms
-            .iter()
-            .map(|term| format!("{}", term_display(term)))
-            .collect();
+        let formatted_terms: Vec<String> = atom.terms.iter().map(term_display).collect();
         format!(
             "{}({})",
             atom.predicate.as_ref(),
@@ -106,7 +107,7 @@ fn term_display(term: &proclog::ast::Term) -> String {
     use proclog::ast::Term;
     match term {
         Term::Variable(sym) => sym.as_ref().to_string(),
-        Term::Constant(value) => format!("{}", value_display(value)),
+        Term::Constant(value) => value_display(value),
         Term::Compound(functor, args) => {
             let rendered: Vec<String> = args.iter().map(term_display).collect();
             format!("{}({})", functor.as_ref(), rendered.join(", "))

@@ -245,11 +245,10 @@ impl ReplEngine {
                 CompiledResult::Datalog(db) => {
                     let atoms: HashSet<Atom> = db.all_facts().into_iter().cloned().collect();
                     let answer_set = AnswerSet { atoms };
-                    let mut lines = Vec::new();
-                    lines.push(
+                    let lines = vec![
                         "Program has no choice rules; deterministic result shown.".to_string(),
-                    );
-                    lines.push(format_answer_set_line(1, &answer_set));
+                        format_answer_set_line(1, &answer_set),
+                    ];
                     EngineResponse::output(lines)
                 }
                 CompiledResult::Asp { program, .. } => {
@@ -302,9 +301,10 @@ impl ReplEngine {
                 self.set_solver(true);
                 EngineResponse::info(vec!["Switched to SAT solver backend (splr)".to_string()])
             }
-            other => EngineResponse::error(vec![
-                format!("Unknown solver: '{}'. Use 'native' or 'sat'.", other),
-            ]),
+            other => EngineResponse::error(vec![format!(
+                "Unknown solver: '{}'. Use 'native' or 'sat'.",
+                other
+            )]),
         }
     }
 
@@ -462,7 +462,9 @@ impl ReplEngine {
                     return Err("Test blocks are not supported in the REPL.".to_string());
                 }
                 Statement::Optimize(_) => {
-                    return Err("Optimization statements are not yet supported in the REPL.".to_string());
+                    return Err(
+                        "Optimization statements are not yet supported in the REPL.".to_string()
+                    );
                 }
             }
         }
@@ -565,11 +567,8 @@ impl ReplEngine {
         match self.ensure_compiled() {
             Ok(compiled) => match &compiled.result {
                 CompiledResult::Datalog(db) => {
-                    let mut facts: Vec<String> = db
-                        .all_facts()
-                        .into_iter()
-                        .map(|atom| format_atom(atom))
-                        .collect();
+                    let mut facts: Vec<String> =
+                        db.all_facts().into_iter().map(format_atom).collect();
                     facts.sort();
                     if facts.is_empty() {
                         vec!["(no facts in current database)".into()]
@@ -838,7 +837,7 @@ fn format_parse_errors(input: &str, errors: Vec<ParseError>) -> Vec<String> {
         lines
     }
 
-    fn locate_line<'a>(lines: &'a [LineInfo], char_index: usize) -> &'a LineInfo {
+    fn locate_line(lines: &[LineInfo], char_index: usize) -> &LineInfo {
         lines
             .iter()
             .find(|line| char_index >= line.start_char && char_index <= line.end_char)
@@ -870,11 +869,7 @@ fn format_parse_errors(input: &str, errors: Vec<ParseError>) -> Vec<String> {
             start.saturating_sub(line.start_char)
         };
         let start_offset = start_offset.min(line_len);
-        let span_len = if end > start {
-            end - start
-        } else {
-            1
-        };
+        let span_len = if end > start { end - start } else { 1 };
         let available = line_len.saturating_sub(start_offset);
         let pointer_width = if available == 0 {
             1
@@ -890,7 +885,6 @@ fn format_parse_errors(input: &str, errors: Vec<ParseError>) -> Vec<String> {
     ) -> Vec<String> {
         let mut tokens: Vec<String> = err
             .expected()
-            .into_iter()
             .map(|expected| match expected {
                 Some(token) => format!("'{}'", token),
                 None => "end of input".to_string(),
@@ -940,7 +934,9 @@ fn format_reason<T: std::fmt::Display + Clone + std::cmp::Eq + std::hash::Hash>(
                 Some(expected_tokens.join(", "))
             };
             match (expected, error.found()) {
-                (Some(expected), Some(found)) => format!("expected {}, found '{}'", expected, found),
+                (Some(expected), Some(found)) => {
+                    format!("expected {}, found '{}'", expected, found)
+                }
                 (Some(expected), None) => format!("expected {}, found end of input", expected),
                 (None, Some(found)) => format!("unexpected '{}'", found),
                 (None, None) => "unexpected end of input".to_string(),

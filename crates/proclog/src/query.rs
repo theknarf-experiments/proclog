@@ -48,11 +48,7 @@ pub fn extract_bindings(
 ) -> Vec<(Symbol, String)> {
     variables
         .iter()
-        .filter_map(|var| {
-            subst
-                .get(var)
-                .map(|term| (var.clone(), format!("{:?}", term)))
-        })
+        .filter_map(|var| subst.get(var).map(|term| (*var, format!("{:?}", term))))
         .collect()
 }
 
@@ -66,7 +62,7 @@ pub fn query_variables(query: &Query) -> HashSet<Symbol> {
     fn collect_term_vars(term: &Term, vars: &mut HashSet<Symbol>) {
         match term {
             Term::Variable(v) => {
-                vars.insert(v.clone());
+                vars.insert(*v);
             }
             Term::Compound(_, args) => {
                 for arg in args {

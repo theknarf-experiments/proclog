@@ -100,12 +100,12 @@ impl DependencyGraph {
 
     /// Add a dependency edge
     fn add_dependency(&mut self, from: Symbol, to: Symbol, dep_type: DependencyType) {
-        self.predicates.insert(from.clone());
-        self.predicates.insert(to.clone());
+        self.predicates.insert(from);
+        self.predicates.insert(to);
 
         self.dependencies
             .entry(from)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push((to, dep_type));
     }
 
@@ -120,23 +120,15 @@ fn build_dependency_graph(rules: &[Rule]) -> DependencyGraph {
     let mut graph = DependencyGraph::new();
 
     for rule in rules {
-        let head_pred = rule.head.predicate.clone();
+        let head_pred = rule.head.predicate;
 
         for literal in &rule.body {
             match literal {
                 Literal::Positive(atom) => {
-                    graph.add_dependency(
-                        head_pred.clone(),
-                        atom.predicate.clone(),
-                        DependencyType::Positive,
-                    );
+                    graph.add_dependency(head_pred, atom.predicate, DependencyType::Positive);
                 }
                 Literal::Negative(atom) => {
-                    graph.add_dependency(
-                        head_pred.clone(),
-                        atom.predicate.clone(),
-                        DependencyType::Negative,
-                    );
+                    graph.add_dependency(head_pred, atom.predicate, DependencyType::Negative);
                 }
                 Literal::Aggregate(agg) => {
                     // Aggregates create negative dependencies (like negation)
@@ -144,8 +136,8 @@ fn build_dependency_graph(rules: &[Rule]) -> DependencyGraph {
                     for elem_literal in &agg.elements {
                         if let Some(atom) = elem_literal.atom() {
                             graph.add_dependency(
-                                head_pred.clone(),
-                                atom.predicate.clone(),
+                                head_pred,
+                                atom.predicate,
                                 DependencyType::Negative,
                             );
                         }
@@ -174,7 +166,7 @@ fn has_cycle_through_negation(
         return false;
     }
 
-    visited.insert(from.clone());
+    visited.insert(*from);
 
     for (dep, dep_type) in graph.get_dependencies(from) {
         let is_negative = has_negative || matches!(dep_type, DependencyType::Negative);
@@ -193,7 +185,7 @@ fn detect_negative_cycles(graph: &DependencyGraph) -> Option<Vec<Symbol>> {
     for pred in &graph.predicates {
         let mut visited = HashSet::new();
         if has_cycle_through_negation(graph, pred, pred, &mut visited, false) {
-            return Some(vec![pred.clone()]);
+            return Some(vec![*pred]);
         }
     }
     None
@@ -206,7 +198,7 @@ fn compute_strata(graph: &DependencyGraph) -> HashMap<Symbol, usize> {
 
     // Initialize all predicates to stratum 0
     for pred in &graph.predicates {
-        strata.insert(pred.clone(), 0);
+        strata.insert(*pred, 0);
     }
 
     // Iterate until fixed point
@@ -229,7 +221,7 @@ fn compute_strata(graph: &DependencyGraph) -> HashMap<Symbol, usize> {
             }
 
             if max_stratum > *strata.get(pred).unwrap() {
-                strata.insert(pred.clone(), max_stratum);
+                strata.insert(*pred, max_stratum);
                 changed = true;
             }
         }

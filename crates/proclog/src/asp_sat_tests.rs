@@ -2,8 +2,8 @@
 //!
 //! Following TDD: Start with simple tests, implement features to make them pass
 
-use crate::ast::*;
 use crate::asp_sat::*;
+use crate::ast::*;
 use crate::parser::{ParseError, SrcId};
 use internment::Intern;
 
@@ -69,8 +69,14 @@ mod basic_sat_tests {
         assert_eq!(answer_sets.len(), 1, "Should have exactly one answer set");
 
         let answer_set = &answer_sets[0];
-        assert!(answer_set.atoms.contains(&make_atom("a", vec![])), "Should derive a");
-        assert!(answer_set.atoms.contains(&make_atom("b", vec![])), "Should derive b from rule");
+        assert!(
+            answer_set.atoms.contains(&make_atom("a", vec![])),
+            "Should derive a"
+        );
+        assert!(
+            answer_set.atoms.contains(&make_atom("b", vec![])),
+            "Should derive b from rule"
+        );
     }
 
     #[test]
@@ -96,7 +102,11 @@ mod basic_sat_tests {
 
         let answer_sets = asp_sat_evaluation(&program);
 
-        assert_eq!(answer_sets.len(), 0, "Should have no answer sets due to constraint");
+        assert_eq!(
+            answer_sets.len(),
+            0,
+            "Should have no answer sets due to constraint"
+        );
     }
 
     #[test]
@@ -120,8 +130,12 @@ mod basic_sat_tests {
         // Should have 2 answer sets: one with a, one without
         assert_eq!(answer_sets.len(), 2, "Should have 2 answer sets");
 
-        let has_a = answer_sets.iter().any(|as_set| as_set.atoms.contains(&make_atom("a", vec![])));
-        let has_empty = answer_sets.iter().any(|as_set| !as_set.atoms.contains(&make_atom("a", vec![])));
+        let has_a = answer_sets
+            .iter()
+            .any(|as_set| as_set.atoms.contains(&make_atom("a", vec![])));
+        let has_empty = answer_sets
+            .iter()
+            .any(|as_set| !as_set.atoms.contains(&make_atom("a", vec![])));
 
         assert!(has_a, "Should have answer set with a");
         assert!(has_empty, "Should have answer set without a");
@@ -147,9 +161,18 @@ mod basic_sat_tests {
         assert_eq!(answer_sets.len(), 1, "Should have exactly one answer set");
 
         let answer_set = &answer_sets[0];
-        assert!(answer_set.atoms.contains(&make_atom("a", vec![])), "Should have a");
-        assert!(answer_set.atoms.contains(&make_atom("b", vec![])), "Should derive b (c is false)");
-        assert!(!answer_set.atoms.contains(&make_atom("c", vec![])), "Should not have c");
+        assert!(
+            answer_set.atoms.contains(&make_atom("a", vec![])),
+            "Should have a"
+        );
+        assert!(
+            answer_set.atoms.contains(&make_atom("b", vec![])),
+            "Should derive b (c is false)"
+        );
+        assert!(
+            !answer_set.atoms.contains(&make_atom("c", vec![])),
+            "Should not have c"
+        );
     }
 
     #[test]
@@ -210,9 +233,10 @@ mod basic_sat_tests {
         // Should have 2 answer sets: {} and {a, b}
         assert_eq!(answer_sets.len(), 2, "Should have 2 answer sets");
 
-        let has_both = answer_sets
-            .iter()
-            .any(|as_set| as_set.atoms.contains(&make_atom("a", vec![])) && as_set.atoms.contains(&make_atom("b", vec![])));
+        let has_both = answer_sets.iter().any(|as_set| {
+            as_set.atoms.contains(&make_atom("a", vec![]))
+                && as_set.atoms.contains(&make_atom("b", vec![]))
+        });
         let has_empty = answer_sets.iter().any(|as_set| as_set.atoms.is_empty());
 
         assert!(has_both, "Should have answer set with both a and b");
@@ -257,9 +281,10 @@ mod basic_sat_tests {
         // Should have 3 answer sets: {}, {a}, {b} (not {a, b} due to constraint)
         assert_eq!(answer_sets.len(), 3, "Should have 3 answer sets");
 
-        let has_both = answer_sets
-            .iter()
-            .any(|as_set| as_set.atoms.contains(&make_atom("a", vec![])) && as_set.atoms.contains(&make_atom("b", vec![])));
+        let has_both = answer_sets.iter().any(|as_set| {
+            as_set.atoms.contains(&make_atom("a", vec![]))
+                && as_set.atoms.contains(&make_atom("b", vec![]))
+        });
 
         assert!(!has_both, "Should not have answer set with both a and b");
     }
@@ -368,12 +393,20 @@ mod grounding_integration_tests {
 
         // With 4 independent choice atoms, should have 2^4 = 16 answer sets
         // (including the node facts in all of them)
-        assert_eq!(answer_sets.len(), 16, "Should have 16 answer sets (2^4 edges)");
+        assert_eq!(
+            answer_sets.len(),
+            16,
+            "Should have 16 answer sets (2^4 edges)"
+        );
 
         // All answer sets should contain node facts
         for answer_set in &answer_sets {
-            assert!(answer_set.atoms.contains(&make_atom_terms("node", vec!["a"])));
-            assert!(answer_set.atoms.contains(&make_atom_terms("node", vec!["b"])));
+            assert!(answer_set
+                .atoms
+                .contains(&make_atom_terms("node", vec!["a"])));
+            assert!(answer_set
+                .atoms
+                .contains(&make_atom_terms("node", vec!["b"])));
         }
     }
 
@@ -440,7 +473,10 @@ mod grounding_integration_tests {
                         assert!(
                             answer_set.atoms.contains(&path),
                             "If edge({}, {}) is in answer set, path({}, {}) should also be present",
-                            x, y, x, y
+                            x,
+                            y,
+                            x,
+                            y
                         );
                     }
                 }
@@ -503,7 +539,10 @@ mod grounding_integration_tests {
 
         // All answer sets should contain node facts
         for answer_set in &answer_sets {
-            assert!(answer_set.atoms.iter().any(|a| a.predicate.as_ref() == "node"));
+            assert!(answer_set
+                .atoms
+                .iter()
+                .any(|a| a.predicate.as_ref() == "node"));
         }
     }
 
@@ -602,7 +641,10 @@ mod grounding_integration_tests {
                     && matches!(&a.terms[0], Term::Constant(Value::Atom(ref s)) if s.as_ref() == "a")
                     && matches!(&a.terms[1], Term::Constant(Value::Atom(ref s)) if s.as_ref() == "c")
             });
-            assert!(has_path_ab || has_path_bc, "Should have at least one path fact");
+            assert!(
+                has_path_ab || has_path_bc,
+                "Should have at least one path fact"
+            );
         }
     }
 }
@@ -795,7 +837,9 @@ mod aggregate_integration_tests {
             program.add_statement(Statement::Fact(Fact {
                 atom: Atom {
                     predicate: Intern::new("heavy".to_string()),
-                    terms: vec![Term::Constant(Value::Atom(Intern::new(heavy_weapon.to_string())))],
+                    terms: vec![Term::Constant(Value::Atom(Intern::new(
+                        heavy_weapon.to_string(),
+                    )))],
                 },
             }));
         }
@@ -894,7 +938,8 @@ mod aggregate_integration_tests {
                 .filter(|atom| atom.predicate.as_str().starts_with("picked_"))
                 .count();
             assert_eq!(
-                picked_count, 1,
+                picked_count,
+                1,
                 "Answer set {} should have exactly 1 picked atom, has {}",
                 i + 1,
                 picked_count
@@ -902,15 +947,24 @@ mod aggregate_integration_tests {
         }
 
         // Check that we have one of each
-        let has_a = answer_sets
-            .iter()
-            .any(|as_set| as_set.atoms.iter().any(|a| a.predicate.as_str() == "picked_a"));
-        let has_b = answer_sets
-            .iter()
-            .any(|as_set| as_set.atoms.iter().any(|a| a.predicate.as_str() == "picked_b"));
-        let has_c = answer_sets
-            .iter()
-            .any(|as_set| as_set.atoms.iter().any(|a| a.predicate.as_str() == "picked_c"));
+        let has_a = answer_sets.iter().any(|as_set| {
+            as_set
+                .atoms
+                .iter()
+                .any(|a| a.predicate.as_str() == "picked_a")
+        });
+        let has_b = answer_sets.iter().any(|as_set| {
+            as_set
+                .atoms
+                .iter()
+                .any(|a| a.predicate.as_str() == "picked_b")
+        });
+        let has_c = answer_sets.iter().any(|as_set| {
+            as_set
+                .atoms
+                .iter()
+                .any(|a| a.predicate.as_str() == "picked_c")
+        });
 
         assert!(has_a, "Missing answer set with picked_a");
         assert!(has_b, "Missing answer set with picked_b");

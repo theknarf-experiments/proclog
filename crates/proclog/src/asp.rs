@@ -72,16 +72,12 @@ pub fn asp_sample(program: &Program, seed: u64, sample_count: usize) -> Vec<Answ
     picked
 }
 
-fn sort_answer_sets(sets: &mut Vec<AnswerSet>) {
-    sets.sort_by(|a, b| canonical_atoms(a).cmp(&canonical_atoms(b)));
+fn sort_answer_sets(sets: &mut [AnswerSet]) {
+    sets.sort_by_key(canonical_atoms);
 }
 
 fn canonical_atoms(answer_set: &AnswerSet) -> Vec<String> {
-    let mut atoms: Vec<String> = answer_set
-        .atoms
-        .iter()
-        .map(|atom| format_atom(atom))
-        .collect();
+    let mut atoms: Vec<String> = answer_set.atoms.iter().map(format_atom).collect();
     atoms.sort();
     atoms
 }
@@ -525,7 +521,7 @@ fn apply_substitution_to_term(term: &Term, subst: &Substitution) -> Term {
                 .iter()
                 .map(|arg| apply_substitution_to_term(arg, subst))
                 .collect();
-            Term::Compound(functor.clone(), substituted_args)
+            Term::Compound(*functor, substituted_args)
         }
         Term::Range(start, end) => {
             let substituted_start = Box::new(apply_substitution_to_term(start, subst));

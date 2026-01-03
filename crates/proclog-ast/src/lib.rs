@@ -144,8 +144,8 @@ pub enum OptimizeDirection {
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct OptimizeTerm {
-    pub weight: Option<Term>, // Optional weight (defaults to 1)
-    pub term: Term,           // The term being optimized
+    pub weight: Option<Term>,    // Optional weight (defaults to 1)
+    pub term: Term,              // The term being optimized
     pub condition: Vec<Literal>, // Optional condition
 }
 
@@ -163,10 +163,10 @@ pub enum Literal {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AggregateAtom {
     pub function: AggregateFunction,
-    pub variables: Vec<Symbol>,        // Variables used in aggregate (X, Y, etc.)
-    pub elements: Vec<Literal>,        // Condition literals
+    pub variables: Vec<Symbol>, // Variables used in aggregate (X, Y, etc.)
+    pub elements: Vec<Literal>, // Condition literals
     pub comparison: ComparisonOp,
-    pub value: Term,                   // Right-hand side value to compare against
+    pub value: Term, // Right-hand side value to compare against
 }
 
 /// Aggregate functions
@@ -181,11 +181,11 @@ pub enum AggregateFunction {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ComparisonOp {
-    Equal,         // =, ==
-    NotEqual,      // !=
-    LessThan,      // <
-    LessOrEqual,   // <=
-    GreaterThan,   // >
+    Equal,          // =, ==
+    NotEqual,       // !=
+    LessThan,       // <
+    LessOrEqual,    // <=
+    GreaterThan,    // >
     GreaterOrEqual, // >=
 }
 
@@ -280,6 +280,12 @@ impl Program {
     #[allow(dead_code)]
     pub fn add_statement(&mut self, statement: Statement) {
         self.statements.push(statement);
+    }
+}
+
+impl Default for Program {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

@@ -34,6 +34,12 @@ pub struct FactDatabase {
     facts_by_predicate: HashMap<Symbol, HashSet<Atom>>,
 }
 
+impl Default for FactDatabase {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Error type for failed fact insertions
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InsertError {
@@ -75,8 +81,8 @@ impl FactDatabase {
 
         Ok(self
             .facts_by_predicate
-            .entry(atom.predicate.clone())
-            .or_insert_with(HashSet::new)
+            .entry(atom.predicate)
+            .or_default()
             .insert(atom))
     }
 
@@ -85,7 +91,7 @@ impl FactDatabase {
         for (predicate, mut facts) in other.facts_by_predicate.drain() {
             self.facts_by_predicate
                 .entry(predicate)
-                .or_insert_with(HashSet::new)
+                .or_default()
                 .extend(facts.drain());
         }
     }
