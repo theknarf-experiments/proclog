@@ -33,4 +33,5 @@ pub use src::SrcId;
 pub use token::{Keyword, LexError, Token};
 
 #[cfg(test)]
+#[path = "../tests/unit/arithmetic_integration_tests.rs"]
 mod arithmetic_integration_tests;
