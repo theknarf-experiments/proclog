@@ -5,9 +5,10 @@ use chumsky::stream::Stream;
 use internment::Intern;
 
 use crate::token::{lexer, Keyword, LexError, SpannedToken, Token};
+use crate::{Span, SrcId};
 use proclog_ast::*;
 
-type ParserError = Simple<Token>;
+type ParserError = Simple<Token, Span>;
 
 #[derive(Debug, Clone)]
 pub enum ParseError {
@@ -84,19 +85,35 @@ fn token(kind: Token) -> impl Parser<Token, Token, Error = ParserError> + Clone 
     just(kind)
 }
 
-fn lex(input: &str) -> Result<Vec<SpannedToken>, Vec<ParseError>> {
+fn lex_with_src(input: &str, src: SrcId) -> Result<Vec<SpannedToken>, Vec<ParseError>> {
+    let len = input.chars().count();
+    let eoi = Span::new(src, len..len);
+    let stream = Stream::from_iter(
+        eoi,
+        input
+            .chars()
+            .enumerate()
+            .map(|(idx, ch)| (ch, Span::new(src, idx..idx + 1))),
+    );
     lexer()
-        .parse(input)
+        .parse(stream)
         .map_err(|errors| errors.into_iter().map(ParseError::Lex).collect())
+}
+
+#[cfg(test)]
+fn lex(input: &str) -> Result<Vec<SpannedToken>, Vec<ParseError>> {
+    lex_with_src(input, SrcId::empty())
 }
 
 fn parse_with<T>(
     parser: impl Parser<Token, T, Error = ParserError>,
     input: &str,
+    src: SrcId,
 ) -> Result<T, Vec<ParseError>> {
-    let tokens = lex(input)?;
+    let tokens = lex_with_src(input, src)?;
     let end = input.chars().count();
-    let stream = Stream::from_iter(end..end + 1, tokens.into_iter());
+    let eoi = Span::new(src, end..end);
+    let stream = Stream::from_iter(eoi, tokens.into_iter());
     parser
         .parse(stream)
         .map_err(|errors| errors.into_iter().map(ParseError::Parse).collect())
@@ -567,8 +584,8 @@ pub fn program() -> impl Parser<Token, Program, Error = ParserError> + Clone {
 }
 
 /// Helper function to parse with better error handling
-pub fn parse_program(input: &str) -> Result<Program, Vec<ParseError>> {
-    parse_with(program(), input)
+pub fn parse_program(input: &str, src: SrcId) -> Result<Program, Vec<ParseError>> {
+    parse_with(program(), input, src)
 }
 
 /// Parse a query: ?- literal1, literal2, ..., literalN.
@@ -584,13 +601,28 @@ fn query() -> impl Parser<Token, Query, Error = ParserError> + Clone {
 
 /// Helper function to parse a query
 #[cfg_attr(not(test), allow(dead_code))]
-pub fn parse_query(input: &str) -> Result<Query, Vec<ParseError>> {
-    parse_with(query(), input)
+pub fn parse_query(input: &str, src: SrcId) -> Result<Query, Vec<ParseError>> {
+    parse_with(query(), input, src)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn parse_with<T>(
+        parser: impl Parser<Token, T, Error = ParserError>,
+        input: &str,
+    ) -> Result<T, Vec<ParseError>> {
+        super::parse_with(parser, input, SrcId::empty())
+    }
+
+    fn parse_program(input: &str) -> Result<Program, Vec<ParseError>> {
+        super::parse_program(input, SrcId::empty())
+    }
+
+    fn parse_query(input: &str) -> Result<Query, Vec<ParseError>> {
+        super::parse_query(input, SrcId::empty())
+    }
 
     // Helper functions for tests
     fn int_term(n: i64) -> Term {

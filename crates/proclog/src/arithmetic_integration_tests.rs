@@ -10,8 +10,12 @@
 #[cfg(test)]
 mod arithmetic_integration_tests {
     use crate::ast::{Literal, Statement, Term};
-    use crate::parser::parse_program;
+    use crate::parser::{ParseError, SrcId};
     use internment::Intern;
+
+    fn parse_program(input: &str) -> Result<crate::ast::Program, Vec<ParseError>> {
+        crate::parser::parse_program(input, SrcId::empty())
+    }
 
     #[test]
     fn test_parse_rule_with_comparison() {

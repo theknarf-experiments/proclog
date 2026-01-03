@@ -16,14 +16,18 @@
 //! # Example
 //!
 //! ```ignore
-//! use proclog_parser::parse_program;
+//! use proclog_parser::{parse_program, SrcId};
 //!
 //! let program_text = "parent(john, mary). ancestor(X, Z) :- parent(X, Z).";
-//! let program = parse_program(program_text).expect("Parse error");
+//! let program = parse_program(program_text, SrcId::empty()).expect("Parse error");
 //! ```
 
 mod parser;
+mod span;
+mod src;
 mod token;
 
-pub use parser::{parse_program, parse_query, program, ParseError};
-pub use token::{lexer, Keyword, LexError, Token};
+pub use parser::{parse_program, parse_query, ParseError};
+pub use span::Span;
+pub use src::SrcId;
+pub use token::{Keyword, LexError, Token};

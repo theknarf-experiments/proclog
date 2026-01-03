@@ -9,6 +9,7 @@ members = [
 resolver = "2"
 
 [workspace.dependencies]
+ariadne = "0.4"
 chumsky = "0.9"
 internment = "0.8"
 crossterm = "0.27"

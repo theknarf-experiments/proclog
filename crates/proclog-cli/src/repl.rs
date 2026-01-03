@@ -7,7 +7,7 @@ use proclog::ast::{
 use proclog::constants::ConstantEnv;
 use proclog::database::FactDatabase;
 use proclog::evaluation::stratified_evaluation_with_constraints;
-use proclog::parser::{parse_program, parse_query, ParseError};
+use proclog::parser::{parse_program, parse_query, ParseError, SrcId};
 use proclog::query::{evaluate_query, query_variables};
 use proclog::unification::Substitution;
 use std::collections::HashSet;
@@ -129,7 +129,7 @@ impl ReplEngine {
     }
 
     fn handle_statements(&mut self, input: &str) -> EngineResponse {
-        match parse_program(input) {
+        match parse_program(input, SrcId::repl()) {
             Ok(program) => {
                 let mut to_add = Vec::new();
                 let mut summary = AdditionSummary::default();
@@ -187,7 +187,7 @@ impl ReplEngine {
     }
 
     fn handle_query(&mut self, input: &str) -> EngineResponse {
-        match parse_query(input) {
+        match parse_query(input, SrcId::repl()) {
             Ok(query) => self.evaluate_query(query),
             Err(errors) => EngineResponse::error(format_parse_errors(input, errors)),
         }
@@ -860,16 +860,18 @@ fn format_parse_errors(input: &str, errors: Vec<ParseError>) -> Vec<String> {
         relative.min(line.content.chars().count()) + 1
     }
 
-    fn pointer_line(line: &LineInfo, span: &std::ops::Range<usize>) -> (usize, usize) {
+    fn pointer_line(line: &LineInfo, span: &proclog::parser::Span) -> (usize, usize) {
         let line_len = line.content.chars().count();
-        let start_offset = if span.start < line.start_char {
+        let start = span.start();
+        let end = span.end();
+        let start_offset = if start < line.start_char {
             0
         } else {
-            span.start.saturating_sub(line.start_char)
+            start.saturating_sub(line.start_char)
         };
         let start_offset = start_offset.min(line_len);
-        let span_len = if span.end > span.start {
-            span.end - span.start
+        let span_len = if end > start {
+            end - start
         } else {
             1
         };
@@ -884,7 +886,7 @@ fn format_parse_errors(input: &str, errors: Vec<ParseError>) -> Vec<String> {
     }
 
     fn format_expected<T: std::fmt::Display + Clone + std::cmp::Eq + std::hash::Hash>(
-        err: &Simple<T>,
+        err: &Simple<T, proclog::parser::Span>,
     ) -> Vec<String> {
         let mut tokens: Vec<String> = err
             .expected()
@@ -907,8 +909,8 @@ fn format_parse_errors(input: &str, errors: Vec<ParseError>) -> Vec<String> {
             ParseError::Lex(err) => (err.span(), format_reason(err, &format_expected(err))),
             ParseError::Parse(err) => (err.span(), format_reason(err, &format_expected(err))),
         };
-        let line = locate_line(&lines, span.start);
-        let column = char_index_to_column(line, span.start);
+        let line = locate_line(&lines, span.start());
+        let column = char_index_to_column(line, span.start());
         let (pointer_offset, pointer_width) = pointer_line(line, &span);
 
         formatted.push(format!(
@@ -927,7 +929,7 @@ fn format_parse_errors(input: &str, errors: Vec<ParseError>) -> Vec<String> {
 }
 
 fn format_reason<T: std::fmt::Display + Clone + std::cmp::Eq + std::hash::Hash>(
-    error: &Simple<T>,
+    error: &Simple<T, proclog::parser::Span>,
     expected_tokens: &[String],
 ) -> String {
     match error.reason() {
@@ -1105,5 +1107,19 @@ mod tests {
                 "                    ^".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn test_parse_error_reports_correct_line_and_column() {
+        let mut engine = ReplEngine::new();
+        let response = engine.process_line("parent(john, mary).\nchild(alice, bob)");
+        assert_eq!(response.kind, ResponseKind::Error);
+        assert!(
+            response.lines[0].contains("line 2, column 18"),
+            "Unexpected location: {}",
+            response.lines[0]
+        );
+        assert_eq!(response.lines[1], "  child(alice, bob)");
+        assert_eq!(response.lines[2], format!("  {}^", " ".repeat(17)));
     }
 }

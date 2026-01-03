@@ -1,7 +1,7 @@
 use crate::repl::ReplEngine;
 use proclog::asp::{asp_evaluation, asp_sample};
 use proclog::asp_sat::asp_sat_evaluation_with_grounding;
-use proclog::parser::parse_program;
+use proclog::parser::{parse_program, SrcId};
 use std::fs;
 use std::path::Path;
 
@@ -9,7 +9,7 @@ pub fn run(path: &Path, sample: Option<usize>, seed: u64, use_sat_solver: bool) 
     let content = fs::read_to_string(path)
         .map_err(|e| format!("failed to read '{}': {}", path.display(), e))?;
 
-    let program = parse_program(&content)
+    let program = parse_program(&content, SrcId::from_path(path))
         .map_err(|errs| format!("Parse failed with {} error(s)", errs.len()))?;
 
     match sample {

@@ -869,9 +869,13 @@ fn format_term_pretty(term: &Term) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{Literal, Rule, Statement, Term, Value};
-    use crate::parser::parse_program;
+    use crate::ast::{Literal, Program, Rule, Statement, Term, Value};
+    use crate::parser::{ParseError, SrcId};
     use internment::Intern;
+
+    fn parse_program(input: &str) -> Result<Program, Vec<ParseError>> {
+        crate::parser::parse_program(input, SrcId::empty())
+    }
 
     fn atom_const(name: &str) -> Term {
         Term::Constant(Value::Atom(Intern::new(name.to_string())))

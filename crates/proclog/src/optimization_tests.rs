@@ -5,7 +5,11 @@
 use crate::asp::asp_evaluation;
 use crate::asp_sat::asp_sat_evaluation;
 use crate::ast::{Term, Value};
-use crate::parser::parse_program;
+use crate::parser::{ParseError, SrcId};
+
+fn parse_program(input: &str) -> Result<crate::ast::Program, Vec<ParseError>> {
+    crate::parser::parse_program(input, SrcId::empty())
+}
 
 #[cfg(test)]
 mod native_optimization_tests {

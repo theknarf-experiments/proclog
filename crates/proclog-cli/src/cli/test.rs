@@ -124,7 +124,7 @@ fn run_tests_from_file(path: &Path, display_name: &str, use_sat_solver: bool) ->
         }
     };
 
-    let program = match parser::parse_program(&content) {
+    let program = match parser::parse_program(&content, parser::SrcId::from_path(path)) {
         Ok(p) => p,
         Err(errors) => {
             eprintln!(
@@ -217,7 +217,11 @@ fn format_parse_error(file_name: &str, source: &str, error: &ParseError) -> Stri
     }
 }
 
-fn format_char_error(file_name: &str, source: &str, error: &Simple<char>) -> String {
+fn format_char_error(
+    file_name: &str,
+    source: &str,
+    error: &Simple<char, proclog::parser::Span>,
+) -> String {
     format_error_with_expected(
         file_name,
         source,
@@ -227,7 +231,11 @@ fn format_char_error(file_name: &str, source: &str, error: &Simple<char>) -> Str
     )
 }
 
-fn format_token_error(file_name: &str, source: &str, error: &Simple<Token>) -> String {
+fn format_token_error(
+    file_name: &str,
+    source: &str,
+    error: &Simple<Token, proclog::parser::Span>,
+) -> String {
     format_error_with_expected(
         file_name,
         source,
@@ -240,15 +248,15 @@ fn format_token_error(file_name: &str, source: &str, error: &Simple<Token>) -> S
 fn format_error_with_expected<T: std::fmt::Display + Clone + std::cmp::Eq + std::hash::Hash>(
     file_name: &str,
     source: &str,
-    error: &Simple<T>,
+    error: &Simple<T, proclog::parser::Span>,
     unexpected: impl Fn(&T) -> String,
     expected_token: impl Fn(&T) -> String,
 ) -> String {
     let span = error.span();
     let total_chars = source.chars().count();
 
-    let start_char = span.start.min(total_chars);
-    let end_char = span.end.min(total_chars);
+    let start_char = span.start().min(total_chars);
+    let end_char = span.end().min(total_chars);
 
     let start_byte = char_idx_to_byte(source, start_char);
     let end_byte = char_idx_to_byte(source, end_char);

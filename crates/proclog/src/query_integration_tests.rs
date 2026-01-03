@@ -8,8 +8,16 @@
 #[cfg(test)]
 mod query_integration_tests {
     use crate::evaluation::semi_naive_evaluation;
-    use crate::parser::{parse_program, parse_query};
+    use crate::parser::{ParseError, SrcId};
     use crate::query::{evaluate_query, extract_bindings, query_variables};
+
+    fn parse_program(input: &str) -> Result<crate::ast::Program, Vec<ParseError>> {
+        crate::parser::parse_program(input, SrcId::empty())
+    }
+
+    fn parse_query(input: &str) -> Result<crate::ast::Query, Vec<ParseError>> {
+        crate::parser::parse_query(input, SrcId::empty())
+    }
 
     #[test]
     fn test_query_after_evaluation() {

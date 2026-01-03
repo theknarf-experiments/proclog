@@ -8,6 +8,11 @@ use internment::Intern;
 #[cfg(test)]
 mod count_aggregate_tests {
     use super::*;
+    use crate::parser::{ParseError, SrcId};
+
+    fn parse_program(input: &str) -> Result<Program, Vec<ParseError>> {
+        crate::parser::parse_program(input, SrcId::empty())
+    }
 
     // Helper to create aggregate atom: count { X : predicate(X) } op value
     fn make_count_aggregate(
@@ -49,7 +54,7 @@ mod count_aggregate_tests {
             :- count { X : selected(X) } > 2.
         "#;
 
-        let program = crate::parser::parse_program(program_text)
+        let program = parse_program(program_text)
             .expect("Failed to parse program with count aggregate");
         let answer_sets = crate::asp::asp_evaluation(&program);
 

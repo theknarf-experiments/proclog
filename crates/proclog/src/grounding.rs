@@ -542,7 +542,13 @@ pub fn ground_choice_rule_split(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast::Program;
+    use crate::parser::{ParseError, SrcId};
     use internment::Intern;
+
+    fn parse_program(input: &str) -> Result<Program, Vec<ParseError>> {
+        crate::parser::parse_program(input, SrcId::empty())
+    }
 
     fn satisfy_body_naive(body: &[Literal], db: &FactDatabase) -> Vec<Substitution> {
         if body.is_empty() {
@@ -1068,7 +1074,6 @@ mod tests {
     #[test]
     fn test_integration_parse_ground_query() {
         use crate::ast::Statement;
-        use crate::parser;
 
         // A complete ProcLog program with facts and rules
         let program_text = r#"
@@ -1083,7 +1088,7 @@ mod tests {
         "#;
 
         // Step 1: Parse the program
-        let program = parser::parse_program(program_text).expect("Should parse successfully");
+        let program = parse_program(program_text).expect("Should parse successfully");
 
         // Step 2: Load facts into database
         let mut db = FactDatabase::new();

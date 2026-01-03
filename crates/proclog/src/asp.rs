@@ -538,8 +538,12 @@ fn apply_substitution_to_term(term: &Term, subst: &Substitution) -> Term {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::parse_program;
+    use crate::parser::{ParseError, SrcId};
     use internment::Intern;
+
+    fn parse_program(input: &str) -> Result<Program, Vec<ParseError>> {
+        crate::parser::parse_program(input, SrcId::empty())
+    }
 
     #[test]
     fn test_seeded_sampling_is_deterministic() {

@@ -1,10 +1,10 @@
 use chumsky::prelude::*;
 use std::fmt;
-use std::ops::Range;
 
-pub type Span = Range<usize>;
+use crate::Span;
+
 pub type SpannedToken = (Token, Span);
-pub type LexError = Simple<char>;
+pub type LexError = Simple<char, Span>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Keyword {

@@ -4,6 +4,7 @@
 //! allowing it to be used from JavaScript/TypeScript in Node.js and browsers.
 
 use proclog::{asp, parser, test_runner};
+use proclog::parser::SrcId;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -18,7 +19,7 @@ pub fn init() {
 /// Returns the parsed AST as a JavaScript object.
 #[wasm_bindgen]
 pub fn parse_program(source: &str) -> Result<JsValue, JsValue> {
-    parser::parse_program(source)
+    parser::parse_program(source, SrcId::empty())
         .map(|program| serde_wasm_bindgen::to_value(&program))
         .map_err(|errors| JsValue::from_str(&format!("Parse error: {:?}", errors)))?
         .map_err(|e| JsValue::from_str(&e.to_string()))
@@ -29,7 +30,7 @@ pub fn parse_program(source: &str) -> Result<JsValue, JsValue> {
 #[wasm_bindgen]
 pub fn evaluate_program(source: &str) -> Result<JsValue, JsValue> {
     // Parse the program
-    let program = parser::parse_program(source)
+    let program = parser::parse_program(source, SrcId::empty())
         .map_err(|errors| JsValue::from_str(&format!("Parse error: {:?}", errors)))?;
 
     // Evaluate using ASP
@@ -64,7 +65,7 @@ pub fn evaluate_program(source: &str) -> Result<JsValue, JsValue> {
 #[wasm_bindgen]
 pub fn run_tests(source: &str, use_sat_solver: bool) -> Result<JsValue, JsValue> {
     // Parse the program
-    let program = parser::parse_program(source)
+    let program = parser::parse_program(source, SrcId::empty())
         .map_err(|errors| JsValue::from_str(&format!("Parse error: {:?}", errors)))?;
 
     // Separate test blocks from base statements

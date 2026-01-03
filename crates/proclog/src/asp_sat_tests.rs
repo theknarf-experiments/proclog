@@ -4,8 +4,12 @@
 
 use crate::ast::*;
 use crate::asp_sat::*;
-use crate::parser::parse_program;
+use crate::parser::{ParseError, SrcId};
 use internment::Intern;
+
+fn parse_program(input: &str) -> Result<Program, Vec<ParseError>> {
+    crate::parser::parse_program(input, SrcId::empty())
+}
 
 #[cfg(test)]
 mod basic_sat_tests {

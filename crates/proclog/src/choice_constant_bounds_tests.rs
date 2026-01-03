@@ -7,7 +7,11 @@
 #[cfg(test)]
 mod choice_constant_bounds_tests {
     use crate::asp::asp_evaluation;
-    use crate::parser::parse_program;
+    use crate::parser::{ParseError, SrcId};
+
+    fn parse_program(input: &str) -> Result<crate::ast::Program, Vec<ParseError>> {
+        crate::parser::parse_program(input, SrcId::empty())
+    }
 
     #[test]
     fn test_constant_lower_bound() {

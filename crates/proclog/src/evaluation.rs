@@ -436,9 +436,14 @@ pub fn stratified_evaluation(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{Atom, Literal, Term, Value};
+    use crate::ast::{Atom, Literal, Program, Term, Value};
     use crate::database::InsertError;
+    use crate::parser::{ParseError, SrcId};
     use internment::Intern;
+
+    fn parse_program(input: &str) -> Result<Program, Vec<ParseError>> {
+        crate::parser::parse_program(input, SrcId::empty())
+    }
 
     // Helper functions
     fn atom_const(name: &str) -> Term {
@@ -729,8 +734,6 @@ mod tests {
     #[test]
     fn test_integration_full_program_execution() {
         use crate::ast::Statement;
-        use crate::parser;
-
         // A complete ProcLog program with transitive closure
         let program_text = r#"
             % Graph edges
@@ -748,7 +751,7 @@ mod tests {
         "#;
 
         // Step 1: Parse
-        let program = parser::parse_program(program_text).expect("Should parse successfully");
+        let program = parse_program(program_text).expect("Should parse successfully");
 
         // Step 2: Separate facts and rules
         let mut initial_db = FactDatabase::new();
@@ -1066,8 +1069,6 @@ mod tests {
     #[test]
     fn test_integration_ancestor_example() {
         use crate::ast::Statement;
-        use crate::parser;
-
         // Family tree example
         let program_text = r#"
             % Facts: parent relationships
@@ -1081,7 +1082,7 @@ mod tests {
             ancestor(X, Z) :- ancestor(X, Y), parent(Y, Z).
         "#;
 
-        let program = parser::parse_program(program_text).expect("Should parse successfully");
+        let program = parse_program(program_text).expect("Should parse successfully");
 
         let mut initial_db = FactDatabase::new();
         let mut rules = Vec::new();
@@ -1250,8 +1251,6 @@ mod tests {
     #[test]
     fn test_stratified_evaluation_complex_example() {
         use crate::ast::Statement;
-        use crate::parser;
-
         // Complete program with stratified negation
         let program_text = r#"
             % Facts about people
@@ -1270,7 +1269,7 @@ mod tests {
             needs_help(X) :- unemployed(X).
         "#;
 
-        let program = parser::parse_program(program_text).expect("Should parse successfully");
+        let program = parse_program(program_text).expect("Should parse successfully");
 
         let mut initial_db = FactDatabase::new();
         let mut rules = Vec::new();
@@ -1307,8 +1306,6 @@ mod tests {
     #[test]
     fn test_stratified_evaluation_eligibility() {
         use crate::ast::Statement;
-        use crate::parser;
-
         // Eligibility example with multiple strata
         let program_text = r#"
             % Facts about students
@@ -1329,7 +1326,7 @@ mod tests {
             priority_candidate(X) :- needs_financial_aid(X).
         "#;
 
-        let program = parser::parse_program(program_text).expect("Should parse successfully");
+        let program = parse_program(program_text).expect("Should parse successfully");
 
         let mut initial_db = FactDatabase::new();
         let mut rules = Vec::new();
@@ -1375,8 +1372,6 @@ mod tests {
     #[test]
     fn test_stratified_with_transitive_closure_and_negation() {
         use crate::ast::Statement;
-        use crate::parser;
-
         // Reachability with blocked nodes
         let program_text = r#"
             % Graph edges
@@ -1400,7 +1395,7 @@ mod tests {
             safe_reachable(X, Z) :- safe_reachable(X, Y), edge(Y, Z), not blocked(Z).
         "#;
 
-        let program = parser::parse_program(program_text).expect("Should parse successfully");
+        let program = parse_program(program_text).expect("Should parse successfully");
 
         let mut initial_db = FactDatabase::new();
         let mut rules = Vec::new();
@@ -1463,8 +1458,6 @@ mod tests {
     #[test]
     fn test_stratified_ancestor_with_exclusions() {
         use crate::ast::Statement;
-        use crate::parser;
-
         // Family tree with estrangement
         let program_text = r#"
             % Parent relationships
@@ -1486,7 +1479,7 @@ mod tests {
             recognized_family(X, Z) :- recognized_family(X, Y), parent(Y, Z), not estranged(Z).
         "#;
 
-        let program = parser::parse_program(program_text).expect("Should parse successfully");
+        let program = parse_program(program_text).expect("Should parse successfully");
 
         let mut initial_db = FactDatabase::new();
         let mut rules = Vec::new();
@@ -1533,8 +1526,6 @@ mod tests {
     #[test]
     fn test_stratified_multiple_recursive_predicates_with_negation() {
         use crate::ast::Statement;
-        use crate::parser;
-
         // Complex dependency graph with recursion and negation
         let program_text = r#"
             % Base graph
@@ -1559,7 +1550,7 @@ mod tests {
             safe_path(X, Z) :- safe_path(X, Y), edge(Y, Z), not dangerous(edge(Y, Z)), not in_cycle(Z).
         "#;
 
-        let program = parser::parse_program(program_text).expect("Should parse successfully");
+        let program = parse_program(program_text).expect("Should parse successfully");
 
         let mut initial_db = FactDatabase::new();
         let mut rules = Vec::new();
@@ -1687,8 +1678,6 @@ mod tests {
     #[test]
     fn test_stratified_double_negation() {
         use crate::ast::Statement;
-        use crate::parser;
-
         // Test multiple levels of negation
         let program_text = r#"
             % Base facts
@@ -1707,7 +1696,7 @@ mod tests {
             non_included(X) :- base(X), not included(X).
         "#;
 
-        let program = parser::parse_program(program_text).expect("Should parse successfully");
+        let program = parse_program(program_text).expect("Should parse successfully");
 
         let mut initial_db = FactDatabase::new();
         let mut rules = Vec::new();
@@ -1747,8 +1736,6 @@ mod tests {
     #[test]
     fn test_stratified_game_states_with_recursion() {
         use crate::ast::Statement;
-        use crate::parser;
-
         // Game state exploration with forbidden states
         let program_text = r#"
             % Initial state
@@ -1779,7 +1766,7 @@ mod tests {
             safely_reachable(S) :- safely_reachable(S0), safe_transition(S0, S).
         "#;
 
-        let program = parser::parse_program(program_text).expect("Should parse successfully");
+        let program = parse_program(program_text).expect("Should parse successfully");
 
         let mut initial_db = FactDatabase::new();
         let mut rules = Vec::new();
@@ -1975,8 +1962,6 @@ mod tests {
     #[test]
     fn test_negation_with_different_datatypes() {
         use crate::ast::Statement;
-        use crate::parser;
-
         let program_text = r#"
             % Player stats
             player(alice).
@@ -1998,7 +1983,7 @@ mod tests {
             will_take_damage(P, D) :- vulnerable(P), base_damage(D).
         "#;
 
-        let program = parser::parse_program(program_text).expect("Should parse successfully");
+        let program = parse_program(program_text).expect("Should parse successfully");
 
         let mut initial_db = FactDatabase::new();
         let mut rules = Vec::new();
