@@ -1,18 +1,24 @@
 pub mod asp;
 pub mod asp_sat;
-pub mod ast;
 pub mod builtins;
 pub mod constants;
 pub mod database;
 pub mod evaluation;
 pub mod grounding;
-pub mod parser;
 pub mod query;
 pub mod safety;
 pub mod sat_solver;
 pub mod stratification;
 pub mod test_runner;
 pub mod unification;
+
+pub mod ast {
+    pub use proclog_ast::*;
+}
+
+pub mod parser {
+    pub use proclog_parser::*;
+}
 
 #[cfg(test)]
 mod aggregate_tests;

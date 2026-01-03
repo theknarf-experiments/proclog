@@ -5,12 +5,13 @@ edition = "2021"
 
 [features]
 default = []
-serde = ["dep:serde", "internment/serde"]
+serde = ["dep:serde", "internment/serde", "proclog-ast/serde"]
 
 [dependencies]
-chumsky = { workspace = true }
 internment = { workspace = true }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
+proclog-ast = { path = "../proclog-ast" }
+proclog-parser = { path = "../proclog-parser" }
 splr = "0.17.2"
 serde = { version = "1.0", features = ["derive"], optional = true }

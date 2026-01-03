@@ -1,0 +1,9 @@
+[package]
+name = "proclog-parser"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+chumsky = { workspace = true }
+internment = { workspace = true }
+proclog-ast = { path = "../proclog-ast" }

@@ -16,7 +16,7 @@
 //! # Example
 //!
 //! ```ignore
-//! use proclog::parser::parse_program;
+//! use proclog_parser::parse_program;
 //!
 //! let program_text = "parent(john, mary). ancestor(X, Z) :- parent(X, Z).";
 //! let program = parse_program(program_text).expect("Parse error");
@@ -25,7 +25,7 @@
 use chumsky::prelude::*;
 use internment::Intern;
 
-use crate::ast::*;
+use proclog_ast::*;
 
 type ParseError = Simple<char>;
 
@@ -379,7 +379,7 @@ fn spacing() -> impl Parser<char, (), Error = ParseError> + Clone {
 
 /// Parse an optimization statement: #minimize { ... } or #maximize { ... }
 fn optimize_statement() -> impl Parser<char, Statement, Error = ParseError> + Clone {
-    use crate::ast::{OptimizeDirection, OptimizeStatement, OptimizeTerm};
+    use proclog_ast::{OptimizeDirection, OptimizeStatement, OptimizeTerm};
 
     // Parse optimization direction (#minimize or #maximize)
     let direction = just('#')

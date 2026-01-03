@@ -112,23 +112,24 @@ pub fn run_tests(source: &str, use_sat_solver: bool) -> Result<JsValue, JsValue>
     serde_wasm_bindgen::to_value(&result).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_arch = "wasm32"))]
 mod tests {
     use super::*;
+    use wasm_bindgen_test::wasm_bindgen_test;
 
-    #[test]
+    #[wasm_bindgen_test]
     fn test_parse_program() {
         let result = parse_program("parent(alice, bob).");
         assert!(result.is_ok());
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn test_evaluate_program() {
         let result = evaluate_program("parent(alice, bob).");
         assert!(result.is_ok());
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn test_run_tests() {
         let source = r#"
             parent(alice, bob).

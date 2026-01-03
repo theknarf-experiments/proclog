@@ -1,6 +1,8 @@
 [workspace]
 members = [
     "crates/proclog",
+    "crates/proclog-ast",
+    "crates/proclog-parser",
     "crates/proclog-cli",
     "crates/proclog-wasm",
 ]
